@@ -3,6 +3,10 @@
   glb=GLB 路径（相对本页）  tail=1 归一化身体并加程序化尾巴  mode=toon|flat  vib=蓝色加饱和度  ow=描边宽度(米)
   crown=x,y,z 呆毛位置  ac0/ac1=呆毛颜色  t/sway/swing/curl=尾巴姿态  spine=尾巴脊线 JSON
   views=front,34,side,back,34b,left,34l  tile=每格宽度  aspect=格子高宽比  rows  elev=相机高度  region=a0,a1 只取身高的这一段  rot=绕 Y 旋转(度)  info=右下角文字
+  times=t1,t2,... 每格一个时间点（用 views 的第一个视角，相机固定，可拼成动图）  nolabel=1 不画标签  stats=t1,t2,... 在这些时间点统计蒙皮变形，结果打印到控制台（加 mats=1 改为打印每根骨骼的蒙皮矩阵）
+  anim=动画名或序号  at=时间(秒)：绑骨模型播放动画，尾巴跟随 Pelvis 骨骼、呆毛跟随 Head 骨骼  hang=尾巴下垂程度（0 = 跟着 Pelvis 刚性转动，1 = 始终竖直下垂，默认 0.8）  tfloor=尾巴用的地面高度（默认 0）  fitbox=x0,y0,z0,x1,y1,z1 用固定的包围盒取景
+  rt=0 每个时间点直接摆姿势（默认从 0 秒按 60 帧/秒播放到该时间点，和实时播放一样包含尾巴的拖尾）
+  bbox=1 配合 times：每个时间点打印身体和尾巴的包围盒、Pelvis 相对绑定姿势的转角（控制台 BBOX）
   test=tail 只看尾巴（proxy=0 去掉灰色替身） -->
 <html><head><meta charset="utf-8"><title>turntable</title>
 <style>html,body{margin:0;background:#e9edf5;overflow:hidden;font-family:"Microsoft YaHei",sans-serif}
@@ -17,8 +21,9 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 const q = new URLSearchParams(location.search);
 const views = (q.get('views') || 'front,34,side,back').split(',');
+const times = q.get('times') ? q.get('times').split(',').map(Number) : null;
 const tile = +(q.get('tile') || 480), rows = +(q.get('rows') || 1);
-const cols = Math.ceil(views.length / rows);
+const cols = Math.ceil((times ? times.length : views.length) / rows);
 const W = cols * tile, H = rows * Math.round(tile * (+(q.get('aspect') || 1.6)));
 const TH = H / rows;
 const ANG = { front: 0, '34': 35, side: 90, back: 180, '34b': 145, left: -90, '34l': -35 };
@@ -31,33 +36,67 @@ document.body.prepend(renderer.domElement);
 const scene = new THREE.Scene();
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8890a8, 2.2));
 const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(1.5, 3, 2.5); scene.add(sun);
-let model;
+let model, clips = '', mixer = null, tailObj = null, tailState = {}, bodyMesh = null;
+const statsOut = {};
 async function load() {
   const glb = q.get('glb');
   if (glb) {
     const l = new GLTFLoader(); l.setMeshoptDecoder(MeshoptDecoder);
-    const g = await l.loadAsync(glb);
-    model = g.scene;
+    const gltf = await l.loadAsync(glb);
+    model = gltf.scene;
     if (q.get('mode') === 'flat') model.traverse(o => { if (o.isMesh) { const m = o.material; o.material = new THREE.MeshBasicMaterial({ map: m.map || null, color: m.map ? 0xffffff : (m.color || 0xcccccc), side: THREE.DoubleSide }); } });
     if (q.get('tail')) {
-      // normalise the Tripo body (faces +x, centred) to the tail's frame: faces +z, feet on y = 0, 1.35 m tall
+      // normalise the Tripo body (faces +x) to the shared frame: faces +z, feet on y = 0, 1.35 m tall
       const body = model; body.rotation.y = -Math.PI / 2; body.updateMatrixWorld(true);
+      body.traverse(o => { if (o.isMesh) o.frustumCulled = false; });
       let bb = new THREE.Box3().setFromObject(body);
       body.scale.setScalar(1.35 / (bb.max.y - bb.min.y)); body.updateMatrixWorld(true);
       bb = new THREE.Box3().setFromObject(body); body.position.y -= bb.min.y; body.updateMatrixWorld(true);
-      const ow = +(q.get('ow') || 0.0022), T = await import('../src/toon.js'), { createTail } = await import('../src/tail.js');
+      const ow = +(q.get('ow') || 0.0022), vib = +(q.get('vib') || 0);
+      const T = await import('../src/toon.js'), { createTail } = await import('../src/tail.js');
       let opt = {};
-      if (q.get('mode') === 'toon') { T.applyToon(body, { outline: ow, vib: +(q.get('vib') || 0) }); opt = { material: T.toonMaterial({ vertexColors: true }), outline: T.outlineMaterial({ width: ow }) }; }
+      if (q.get('mode') === 'toon') { T.applyToon(body, { outline: ow, vib }); opt = { material: T.toonMaterial({ vertexColors: true }), outline: T.outlineMaterial({ width: ow }) }; }
       else if (q.get('mode') === 'flat') opt = { material: new THREE.MeshBasicMaterial({ vertexColors: true }), outline: T.outlineMaterial({ width: ow }) };
       if (q.get('spine')) opt.spine = JSON.parse(q.get('spine'));
       const tail = createTail(opt);
-      tail.update(+(q.get('t') || 0.55), { sway: +(q.get('sway') ?? 0.1), swing: +(q.get('swing') ?? 0.035), curl: +(q.get('curl') || 0) });
+      tailState = { sway: +(q.get('sway') ?? 0.1), swing: +(q.get('swing') ?? 0.035), curl: +(q.get('curl') || 0), hang: +(q.get('hang') ?? 0.8), floor: q.has('tfloor') ? +q.get('tfloor') : undefined };
+      tail.update(+(q.get('t') || 0.55), tailState); tailObj = tail;
+      body.traverse(o => { if (!bodyMesh && o.isSkinnedMesh && !o.userData.isOutline) bodyMesh = o; });
       model = new THREE.Group(); model.add(body, tail.root);
+      let ahoge = null;
       if (q.get('crown')) {
         const { createAhoge } = await import('../src/ahoge.js');
-        const am = q.get('mode') === 'toon' ? T.toonMaterial({ vertexColors: true, vib: +(q.get('vib') || 0) }) : new THREE.MeshBasicMaterial({ vertexColors: true });
+        const am = q.get('mode') === 'toon' ? T.toonMaterial({ vertexColors: true, vib }) : new THREE.MeshBasicMaterial({ vertexColors: true });
         const base = q.get('crown').split(',').map(Number); base[1] -= 0.004;
-        model.add(createAhoge({ base, color0: q.get('ac0') || '#2c3f9a', color1: q.get('ac1') || '#5d7fd6', material: am, outline: T.outlineMaterial({ width: 0.0011 }) }).root);
+        ahoge = createAhoge({ base, color0: q.get('ac0') || '#2c3f9a', color1: q.get('ac1') || '#5d7fd6', material: am, outline: T.outlineMaterial({ width: 0.0011 }) });
+        model.add(ahoge.root);
+      }
+      // rigged GLB: the tail follows the pelvis and the ahoge the head. anim = clip name or index, at = time in seconds
+      if (q.has('anim') && gltf.animations.length) {
+        const bone = n => { let b = null; body.traverse(o => { if (!b && o.isBone && o.name === n) b = o; }); return b; };
+        model.updateMatrixWorld(true);
+        const hip = bone('Pelvis') || bone('Hip'), head = bone('Head');
+        if (hip) tail.follow(hip, { floor: 0 });
+        if (head && ahoge) head.attach(ahoge.root);
+        const a = q.get('anim'), clip = gltf.animations.find(c => c.name === a) || gltf.animations[+a] || gltf.animations[0];
+        if (q.get('stats')) statsOut.rest = skinStats();
+        mixer = new THREE.AnimationMixer(body); mixer.clipAction(clip).play();
+        if (q.get('stats')) {
+          // dump=t also prints the deformed vertices and each bone's rotation from the bind pose (degrees) at that sample
+          const sb = bodyMesh.skeleton.bones, bindQ = sb.map(b => b.quaternion.clone()), dumpT = q.has('dump') ? +q.get('dump') : null;
+          statsOut.clip = clip.name;
+          statsOut.samples = q.get('stats').split(',').map(Number).map(t => {
+            mixer.setTime(t); model.updateMatrixWorld(true);
+            const s = q.get('mats') ? { t } : { t, ...skinStats() };
+            if (q.get('mats')) console.log('MATS' + JSON.stringify({ t, S: skinMatrices() }));
+            if (dumpT !== null && Math.abs(t - dumpT) < 1e-6) console.log('DUMP' + JSON.stringify({ t, def: Array.from(skinStats.lastDef, v => Math.round(v * 1e5) / 1e5), angles: sb.map((b, i) => [b.name, Math.round(2 * Math.acos(Math.min(1, Math.abs(b.quaternion.dot(bindQ[i])))) * 180 / Math.PI)]) }));
+            return s;
+          });
+          console.log(JSON.stringify(statsOut));
+        }
+        poseAt(+(q.get('at') || 0));
+        model.updateMatrixWorld(true);
+        clips = gltf.animations.map(c => c.name + ':' + c.duration.toFixed(2)).join(',');
       }
     }
   } else if (q.get('test') === 'tail') {
@@ -79,26 +118,130 @@ async function load() {
   const rot = +(q.get('rot') || 0); if (rot) model.rotation.y = THREE.MathUtils.degToRad(rot);
   scene.add(model); model.updateMatrixWorld(true);
 }
+// Skinning check: edge-length ratio (deformed / bind pose) and triangle normal flips relative to the dominant bone.
+// Regions come from each vertex's dominant joint; Thigh/Hip/Pelvis vertices between 0.33 and 0.56 (mesh units, skirt band) count as skirt.
+// Skinning matrices in mesh space (bindMatrixInverse · boneWorld · boneInverse · bindMatrix), column-major, one per joint
+function skinMatrices() {
+  const sm = bodyMesh, bones = sm.skeleton.bones, inv = sm.skeleton.boneInverses, m = new THREE.Matrix4(), t = new THREE.Matrix4(), out = [];
+  for (let j = 0; j < bones.length; j++) { m.multiplyMatrices(bones[j].matrixWorld, inv[j]); t.multiplyMatrices(sm.bindMatrixInverse, m).multiply(sm.bindMatrix); out.push(Array.from(t.elements, v => Math.round(v * 1e7) / 1e7)); }
+  return out;
+}
+function skinStats() {
+  const sm = bodyMesh, g = sm.geometry, P = g.attributes.position, SI = g.attributes.skinIndex, SW = g.attributes.skinWeight, idx = g.index.array, n = P.count;
+  const bones = sm.skeleton.bones, inv = sm.skeleton.boneInverses;
+  if (!skinStats.pre) {
+    const grp = nm => /Head|Neck/.test(nm) ? 'head' : /Clavicle|Upperarm|Forearm|Hand/.test(nm) ? 'arm' : /Spine|Waist/.test(nm) ? 'torso' : /Thigh/.test(nm) ? 'thigh' : /Calf|Foot|Toe/.test(nm) ? 'lowerleg' : 'hips';
+    const rest = new Float64Array(n * 3), J = new Uint16Array(n * 4), Wt = new Float32Array(n * 4), dom = new Uint16Array(n), reg = new Array(n), cnt = {};
+    for (let i = 0; i < n; i++) {
+      rest[3 * i] = P.getX(i); rest[3 * i + 1] = P.getY(i); rest[3 * i + 2] = P.getZ(i);
+      const js = [SI.getX(i), SI.getY(i), SI.getZ(i), SI.getW(i)], ws = [SW.getX(i), SW.getY(i), SW.getZ(i), SW.getW(i)];
+      let bw = -1, bj = 0;
+      for (let k = 0; k < 4; k++) { J[4 * i + k] = js[k]; Wt[4 * i + k] = ws[k]; if (ws[k] > bw) { bw = ws[k]; bj = js[k]; } }
+      let r = grp(bones[bj].name); const y = rest[3 * i + 1];
+      if ((r === 'thigh' || r === 'hips') && y > 0.33 && y < 0.56) r = 'skirt';
+      dom[i] = bj; reg[i] = r; cnt[r] = (cnt[r] || 0) + 1;
+    }
+    skinStats.pre = { rest, J, Wt, dom, reg };
+    statsOut.regions = cnt; statsOut.tris = idx.length / 3;
+  }
+  const { rest, J, Wt, dom, reg } = skinStats.pre;
+  const nb = bones.length, S = new Float64Array(nb * 16), m = new THREE.Matrix4(), t = new THREE.Matrix4();
+  for (let j = 0; j < nb; j++) { m.multiplyMatrices(bones[j].matrixWorld, inv[j]); t.multiplyMatrices(sm.bindMatrixInverse, m).multiply(sm.bindMatrix); S.set(t.elements, j * 16); }
+  const def = new Float64Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const x = rest[3 * i], y = rest[3 * i + 1], z = rest[3 * i + 2]; let ox = 0, oy = 0, oz = 0;
+    for (let k = 0; k < 4; k++) {
+      const w = Wt[4 * i + k]; if (!w) continue; const e = J[4 * i + k] * 16;
+      ox += w * (S[e] * x + S[e + 4] * y + S[e + 8] * z + S[e + 12]);
+      oy += w * (S[e + 1] * x + S[e + 5] * y + S[e + 9] * z + S[e + 13]);
+      oz += w * (S[e + 2] * x + S[e + 6] * y + S[e + 10] * z + S[e + 14]);
+    }
+    def[3 * i] = ox; def[3 * i + 1] = oy; def[3 * i + 2] = oz;
+  }
+  const nt = idx.length / 3, ratios = new Float64Array(nt * 3), badReg = {}, flipReg = {};
+  let bad = 0, flips = 0;
+  const len = (A, a, b) => Math.hypot(A[3 * a] - A[3 * b], A[3 * a + 1] - A[3 * b + 1], A[3 * a + 2] - A[3 * b + 2]);
+  const cross = (A, a, b, c) => { const ux = A[3 * b] - A[3 * a], uy = A[3 * b + 1] - A[3 * a + 1], uz = A[3 * b + 2] - A[3 * a + 2], vx = A[3 * c] - A[3 * a], vy = A[3 * c + 1] - A[3 * a + 1], vz = A[3 * c + 2] - A[3 * a + 2]; return [uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx]; };
+  for (let f = 0; f < nt; f++) {
+    const a = idx[3 * f], b = idx[3 * f + 1], c = idx[3 * f + 2];
+    let isBad = false;
+    const E = [a, b, b, c, c, a];
+    for (let k = 0; k < 3; k++) { const l0 = len(rest, E[2 * k], E[2 * k + 1]); const r = l0 > 1e-7 ? len(def, E[2 * k], E[2 * k + 1]) / l0 : 1; ratios[3 * f + k] = r; if (r > 1.35 || r < 0.7) isBad = true; }
+    if (isBad) { bad++; badReg[reg[a]] = (badReg[reg[a]] || 0) + 1; }
+    const n0 = cross(rest, a, b, c), n1 = cross(def, a, b, c), e = dom[a] * 16;
+    const rx = S[e] * n0[0] + S[e + 4] * n0[1] + S[e + 8] * n0[2], ry = S[e + 1] * n0[0] + S[e + 5] * n0[1] + S[e + 9] * n0[2], rz = S[e + 2] * n0[0] + S[e + 6] * n0[1] + S[e + 10] * n0[2];
+    const m0 = Math.hypot(rx, ry, rz), m1 = Math.hypot(n1[0], n1[1], n1[2]);
+    if (m0 > 1e-12 && m1 > 1e-12 && (rx * n1[0] + ry * n1[1] + rz * n1[2]) / (m0 * m1) < 0) { flips++; flipReg[reg[a]] = (flipReg[reg[a]] || 0) + 1; }
+  }
+  ratios.sort();
+  const qv = p => +ratios[Math.min(ratios.length - 1, Math.floor(p * ratios.length))].toFixed(3);
+  skinStats.lastDef = def;
+  return { min: +ratios[0].toFixed(3), p001: qv(0.001), p50: qv(0.5), p999: qv(0.999), max: +ratios[ratios.length - 1].toFixed(3), bad, badReg, flips, flipReg };
+}
+// World bounds of the deformed meshes. Small skinned meshes (tail, flukes) are measured vertex by vertex: their local box
+// rotated by the pelvis would overstate the extent. Large ones use their skinned local box (the body only turns by 90°).
+function meshBounds(root, box = new THREE.Box3()) {
+  const v = new THREE.Vector3(), b = new THREE.Box3();
+  root.updateMatrixWorld(true);
+  root.traverse(o => {
+    if (!o.isMesh) return;
+    const pos = o.geometry.attributes.position;
+    if (o.isSkinnedMesh && pos.count < 20000) { for (let i = 0; i < pos.count; i++) box.expandByPoint(o.getVertexPosition(i, v).applyMatrix4(o.matrixWorld)); return; }
+    if (o.isSkinnedMesh) o.computeBoundingBox(); else if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+    box.union(b.copy(o.isSkinnedMesh ? o.boundingBox : o.geometry.boundingBox).applyMatrix4(o.matrixWorld));
+  });
+  return box;
+}
+// Pose the animated model at time tt. By default this plays the clip from 0 s at 60 fps, the way the real-time loop does,
+// so the tail's lag (dt in tail.js) is included; rt=0 poses every time directly.
+let simT = null;
+function poseAt(tt) {
+  if (!mixer) { if (tailObj) tailObj.update(tt, tailState); return; }
+  if (q.get('rt') === '0' || !tailObj) { mixer.setTime(tt); if (tailObj) tailObj.update(tt, tailState); return; }
+  if (simT === null || tt < simT - 1e-9) { simT = 0; mixer.setTime(0); tailObj.update(0, { ...tailState, dt: 0 }); }
+  while (simT < tt - 1e-9) { const st = Math.min(1 / 60, tt - simT); simT += st; mixer.setTime(simT); tailObj.update(simT, { ...tailState, dt: st }); }
+}
 function frame() {
-  const box = new THREE.Box3().setFromObject(model);
+  let box;
+  if (times && mixer) {
+    box = new THREE.Box3();
+    for (const tt of times) { poseAt(tt); box.union(meshBounds(model)); }
+  } else box = meshBounds(model);
+  if (q.get('bbox') && times && mixer && bodyMesh) {
+    const sk = bodyMesh.skeleton, pi = sk.bones.findIndex(b => b.name === 'Pelvis');
+    const f = b => [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z].map(v => +v.toFixed(3));
+    const rows = times.map(tt => {
+      poseAt(tt); model.updateMatrixWorld(true);
+      const S = new THREE.Matrix4().fromArray(skinMatrices()[pi]), m = new THREE.Matrix3().setFromMatrix4(S);
+      const e = m.elements, sc = Math.hypot(e[0], e[1], e[2]), tr = (e[0] + e[4] + e[8]) / sc;
+      const tj = tailObj ? tailObj.bones.map(b => b.getWorldPosition(new THREE.Vector3()).toArray().map(v => +v.toFixed(3))) : null;
+      const tm = tailObj ? tailObj.meshes.map(m => +meshBounds(m).min.y.toFixed(3)) : null;
+      return { tj, tm, t: tt, body: f(meshBounds(bodyMesh)), tail: tailObj ? f(meshBounds(tailObj.root)) : null, pelvis: +(Math.acos(Math.max(-1, Math.min(1, (tr - 1) / 2))) * 180 / Math.PI).toFixed(1) };
+    });
+    console.log('BBOX' + JSON.stringify(rows));
+  }
+  const fb = q.get('fitbox'); if (fb) { const v = fb.split(',').map(Number); box = new THREE.Box3(new THREE.Vector3(v[0], v[1], v[2]), new THREE.Vector3(v[3], v[4], v[5])); }
   const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
   const reg = q.get('region'); if (reg) { const [a0, a1] = reg.split(',').map(Number); const h = s.y * (a1 - a0); c.y = box.min.y + s.y * (a0 + a1) / 2; s.set(Math.min(s.x, h * 1.1), h, Math.min(s.z, h * 1.1)); }
   const fov = 22, aspect = tile / TH;
   const cam = new THREE.PerspectiveCamera(fov, aspect, 0.01, 100);
   const r = Math.max(s.y / 2 / Math.tan(THREE.MathUtils.degToRad(fov / 2)), Math.max(s.x, s.z) / 2 / Math.tan(THREE.MathUtils.degToRad(fov / 2)) / aspect) * 1.12 + Math.max(s.x, s.z) / 2;
   const lab = document.getElementById('labels');
-  views.forEach((v, i) => {
+  const items = times ? times.map(tt => ({ v: views[0], tt })) : views.map(v => ({ v }));
+  items.forEach(({ v, tt }, i) => {
+    if (tt !== undefined) { poseAt(tt); model.updateMatrixWorld(true); }
     const a = THREE.MathUtils.degToRad(ANG[v] ?? +v);
     cam.position.set(c.x + Math.sin(a) * r, c.y + (q.get('elev') ? +q.get('elev') * s.y : 0.06 * s.y), c.z + Math.cos(a) * r);
     cam.lookAt(c); cam.updateProjectionMatrix();
     const x = (i % cols) * tile, yTop = Math.floor(i / cols) * TH;
     renderer.setViewport(x, H - yTop - TH, tile, TH); renderer.setScissor(x, H - yTop - TH, tile, TH);
-    renderer.setClearColor(i % 2 ? 0xe3e8f1 : 0xedf0f6); renderer.clear();
+    renderer.setClearColor(times ? 0xedf0f6 : (i % 2 ? 0xe3e8f1 : 0xedf0f6)); renderer.clear();
     renderer.render(scene, cam);
-    const d = document.createElement('div'); d.textContent = NAME[v] || v; d.style.left = x + 'px'; d.style.top = yTop + 'px'; lab.appendChild(d);
+    if (q.get('nolabel')) return;
+    const d = document.createElement('div'); d.textContent = tt !== undefined ? tt.toFixed(2) + 's' : (NAME[v] || v); d.style.left = x + 'px'; d.style.top = yTop + 'px'; lab.appendChild(d);
   });
   const info = q.get('info'); if (info) { const d = document.createElement('div'); d.textContent = info; d.style.right = '0'; d.style.bottom = '0'; d.style.fontSize = '16px'; lab.appendChild(d); }
 }
-try { await load(); frame(); document.title = 'READY ' + renderer.info.render.triangles; }
+try { await load(); frame(); document.title = 'READY ' + renderer.info.render.triangles + (clips ? ' ' + clips : ''); }
 catch (e) { document.body.innerHTML = '<pre style="font-size:20px;color:#b00">' + (e.stack || e) + '</pre>'; document.title = 'ERROR'; }
 </script></body></html>
