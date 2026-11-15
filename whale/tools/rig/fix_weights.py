@@ -1,6 +1,8 @@
 
-# v2: rule weights per part, triangles that fuse hands/forearms to the skirt are cut (made degenerate),
+# Rule weights per part, triangles that fuse hands/forearms to the skirt are cut (made degenerate),
 # and a band of K rings around every remaining part boundary is solved as a harmonic blend (Jacobi, anchors fixed).
+# v6: the hand is found by a flood fill from the wrist (skinfix.hand_region) and follows the hand bone as one piece
+# from HT1 past the wrist; between HT0 and HT1 it blends from Tripo's arm-chain weights (the cuff) to the hand bone.
 import os, sys, numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from skinfix import *
@@ -25,6 +27,10 @@ for S in 'LR':
     for c, allowed, fb in [('hand', armset[S], ix[S + '_Hand']), ('arm', armset[S] + [ix['Spine01'], ix['Spine02']], ix[S + '_Upperarm']), ('leg', legset[S] + [ix['Pelvis']], ix[S + '_Calf'])]:
         sel = (cat == c) & (side == S)
         if sel.any(): W[sel] = restrict(sel, allowed, fb)
+HT0, HT1 = [float(v) for v in sys.argv[11:13]] + [-0.01, 0.045][len(sys.argv[11:13]):]
+for S in 'LR':
+    sel = np.isin(cat, ['hand', 'arm']) & (side == S); hs = smoothstep(HT0, HT1, info['hand_t'][S][sel])
+    W[sel] *= (1 - hs)[:, None]; W[sel, ix[S + '_Hand']] += hs
 s = cat == 'torso'; A = Wg0[s].copy(); A[:, allleg] = 0
 dsh = np.minimum(np.linalg.norm(Pg[s] - J['L_Upperarm'], axis=1), np.linalg.norm(Pg[s] - J['R_Upperarm'], axis=1))
 for S_, O_ in (('L', 'R'), ('R', 'L')):

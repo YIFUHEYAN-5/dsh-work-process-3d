@@ -17,10 +17,11 @@ const CLIPS = [['idle', '待机'], ['greet_01', '打招呼'], ['laugh_01', '笑'
 const LABEL = Object.fromEntries(CLIPS);
 // [id, label, camera position, target] in metres; she is 1.35 m tall, faces +z, feet on y = 0.
 // With a bone name (5th entry) the target is that bone's current position plus the 4th entry, and the camera sits at
-// target + the 3rd entry, so the close-ups follow her when a clip moves the head or chest.
+// target + the 3rd entry, so the close-ups follow her when a clip moves the head, chest or hands. Her left is +x.
 const VIEWS = [['front', '正面', [0, 0.8, 3.1], [0, 0.68, 0]], ['34', '斜侧', [2.1, 1.0, 2.3], [0, 0.68, 0]],
   ['side', '侧面', [3.1, 0.8, 0], [0, 0.68, 0]], ['back', '背面', [0, 0.9, -3.1], [0, 0.7, 0]],
   ['face', '脸', [0, 0.02, 0.75], [0, 0.13, 0.03], 'Head'], ['chest', '胸口', [0.3, 0.1, 1.15], [0, 0.05, 0], 'Spine02'],
+  ['handL', '左手', [0.24, 0.04, 0.4], [0, -0.05, 0], 'L_Hand'], ['handR', '右手', [-0.24, 0.04, 0.4], [0, -0.05, 0], 'R_Hand'],
   ['skirt', '裙摆', [0.95, 0.5, 1.6], [0, 0.42, 0]], ['backlow', '背后低', [0.9, 0.55, -1.7], [0, 0.5, 0]]];
 const TAIL = { sway: 0.1, swing: 0.035, curl: 0, hang: 0.8 };
 // same test as whale/tools/rig/eval_skin.py: a triangle is bad when an edge is stretched past 1.35x or squeezed below 0.7x

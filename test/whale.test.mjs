@@ -47,6 +47,40 @@ test('whale_rigged.glb: 10 clips on one 41-joint skin with normalised weights', 
   assert.equal(badJoint, 0, 'weights on joint indices outside the skin');
 });
 
+// The hands of the first weight repair were torn: parts of the fingers and cuffs followed the skirt. Now every hand moves as
+// one piece with its hand bone (whale/tools/rig/check_hands.py checks the same against the Tripo colours).
+test('whale_rigged.glb: each hand is one piece on its own arm, with no triangle tying it to the skirt', () => {
+  const { json, read } = readGlb(new URL('../whale/assets/whale_rigged.glb', import.meta.url));
+  const joints = json.skins[0].joints.map(j => json.nodes[j].name), prim = json.meshes[0].primitives[0];
+  const P = read(prim.attributes.POSITION).out, W = read(prim.attributes.WEIGHTS_0).out, J = read(prim.attributes.JOINTS_0).out, I = read(prim.indices).out;
+  const nv = P.length / 3, dom = new Int32Array(nv), weld = new Int32Array(nv), keys = new Map();
+  for (let v = 0; v < nv; v++) {
+    let best = -1;
+    for (let c = 0; c < 4; c++) if (W[v * 4 + c] > best) { best = W[v * 4 + c]; dom[v] = J[v * 4 + c]; }
+    // UV seams split vertices: weld them by position
+    const k = [0, 1, 2].map(c => Math.round(P[v * 3 + c] / 2e-5)).join(',');
+    if (!keys.has(k)) keys.set(k, keys.size);
+    weld[v] = keys.get(k);
+  }
+  for (const S of ['L', 'R']) {
+    const hand = joints.indexOf(S + '_Hand'), arm = new Set(joints.flatMap((n, i) => (n.startsWith(S + '_') && /Clavicle|Upperarm|Forearm|Hand/.test(n) ? [i] : [])));
+    const parent = Int32Array.from({ length: keys.size }, (_, i) => i);
+    const find = a => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+    let mixed = 0;
+    for (let t = 0; t < I.length; t += 3) {
+      const d = [dom[I[t]], dom[I[t + 1]], dom[I[t + 2]]];
+      if (d.includes(hand) && d.some(x => !arm.has(x))) mixed++;
+      if (d.every(x => x === hand)) { const r = find(weld[I[t]]); parent[find(weld[I[t + 1]])] = r; parent[find(weld[I[t + 2]])] = r; }
+    }
+    const pieces = new Map();
+    for (let v = 0; v < nv; v++) if (dom[v] === hand) { const r = find(weld[v]); if (!pieces.has(r)) pieces.set(r, new Set()); pieces.get(r).add(weld[v]); }
+    const sizes = [...pieces.values()].map(s => s.size).sort((a, b) => b - a), total = sizes.reduce((a, b) => a + b, 0);
+    assert.equal(mixed, 0, S + ' hand: triangles joining the hand to bones outside its arm');
+    assert.ok(total >= 450, S + ' hand: ' + total + ' vertices follow the hand bone (the torn version had 247-308)');
+    assert.equal(sizes.length, 1, S + ' hand: the hand-bone vertices form ' + sizes.length + ' pieces (' + sizes.slice(0, 5) + ')');
+  }
+});
+
 function tailOnPelvis() {
   const scene = new THREE.Scene(), pelvis = new THREE.Bone();
   pelvis.position.set(0, 0.7, -0.02);

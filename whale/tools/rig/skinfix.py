@@ -24,6 +24,34 @@ def chain(Pg, pts, radii):
         dd, t = seg_dist(Pg, pts[k], pts[k + 1]); q = dd / (radii[k] + (radii[k + 1] - radii[k]) * t)
         s = q < best; best[s] = q[s]; seg[s] = k
     return best, seg
+def colour_class(Cg):
+    # texture colour per welded vertex: skin (lit), warm (skin in shadow: palm, between the fingers), white (cuff frills), navy, hair
+    R, G, B = Cg.T; lum = Cg.mean(1); bd = B - np.maximum(R, G)
+    cls = np.full(len(Cg), 'other', dtype=object)
+    cls[(bd > 15) & (lum < 140)] = 'navy'; cls[(bd > 47) & (lum > 98)] = 'hair'
+    cls[(Cg.min(1) > 175) & (Cg.max(1) - Cg.min(1) < 45)] = 'white'
+    cls[(R - B > 15) & (R > 100) & (R >= G - 5)] = 'warm'; cls[(R > 190) & (R - B > 20) & (G > 150)] = 'skin'
+    return cls
+def hand_region(Pg, E, mask, wr, el, cls, rmax=0.11):
+    # The whole hand as one piece: flood from the wrist over skin-coloured vertices (and the white cuff frills right at the
+    # wrist), within rmax of the wrist; it stops at the navy skirt and sleeve. Then vertices whose neighbours are almost all in
+    # the region are added (dark creases). t = distance past the wrist along the forearm direction.
+    u = (wr - el) / np.linalg.norm(wr - el); v = Pg - wr; t = v @ u
+    r = np.linalg.norm(v - t[:, None] * u, axis=1); dist = np.linalg.norm(v, axis=1); near = mask & (dist < rmax)
+    ok = near & (t > -0.025) & (np.isin(cls, ['skin', 'warm']) | ((cls == 'white') & (t < 0.025) & (r < 0.05)))
+    reg = ok & (dist < 0.03)
+    while True:
+        grow = np.zeros(len(Pg), bool); grow[E[reg[E[:, 0]], 1]] = True; grow[E[reg[E[:, 1]], 0]] = True
+        new = reg | (grow & ok)
+        if new.sum() == reg.sum(): break
+        reg = new
+    deg = np.bincount(E.ravel(), minlength=len(Pg))
+    for _ in range(3):
+        cnt = np.bincount(E[:, 0], weights=reg[E[:, 1]], minlength=len(Pg)) + np.bincount(E[:, 1], weights=reg[E[:, 0]], minlength=len(Pg))
+        add = ~reg & near & ~np.isin(cls, ['navy', 'hair']) & (deg > 0) & (cnt >= 0.75 * deg)
+        if not add.any(): break
+        reg = reg | add
+    return reg, t
 def categorize(d):
     Pg, Cg, Wg0, ix, J = d['Pg'], d['Cg'], d['Wg0'], d['ix'], d['J']
     x, y, z = Pg.T; lum = Cg.mean(1); bd = Cg[:, 2] - np.maximum(Cg[:, 0], Cg[:, 1])
@@ -35,18 +63,19 @@ def categorize(d):
     armW0 = Wg0[:, armset['L'] + armset['R']].sum(1)
     headz &= ~((armW0 >= 0.3) & ~hairc & (y < 0.80))
     hair = hairc & ~((np.abs(z - ZC) < 0.035) & (x > 0.06)) & ~headz
+    cls = colour_class(Cg); hand_t = {}
     hand = np.zeros(len(Pg), bool); armz = hand.copy(); leg = hand.copy()
     for S in 'LR':
         sh, el, wr = J[S + '_Upperarm'], J[S + '_Forearm'], J[S + '_Hand']; tip = wr + (wr - el) / np.linalg.norm(wr - el) * 0.075
         q, seg = chain(Pg, [sh, el, wr, tip], [0.045, 0.032, 0.03, 0.032]); armW = Wg0[:, armset[S]].sum(1)
-        hand |= (q < 1) & (seg == 2) & (skin | (np.linalg.norm(Pg - wr, axis=1) < 0.03)) & (side == S)
+        reg, hand_t[S] = hand_region(Pg, d['E'], side == S, wr, el, cls); hand |= reg
         armz |= (q < 1) & (seg < 2) & (armW >= 0.3) & (side == S)
         th, ca, ft, toe = J[S + '_Thigh'], J[S + '_Calf'], J[S + '_Foot'], J[S + '_ToeBase']
         ql, _ = chain(Pg, [th, ca, ft, toe, toe + np.array([0.045, 0, 0])], [0.05, 0.045, 0.04, 0.035, 0.03])
         leg |= (ql < 1) & (y < 0.36) & (side == S)
     cat = np.full(len(Pg), 'torso', dtype=object)
     cat[y < 0.56] = 'skirt'; cat[leg] = 'leg'; cat[armz & ~hair] = 'arm'; cat[hand & ~hair] = 'hand'; cat[hair] = 'hair'; cat[headz] = 'head'
-    return cat, side, dict(armset=armset, legset=legset, hairc=hairc, skin=skin)
+    return cat, side, dict(armset=armset, legset=legset, hairc=hairc, skin=skin, cls=cls, hand_t=hand_t)
 def dense(JN, WT, nJ):
     W = np.zeros((len(JN), nJ)); np.add.at(W, (np.repeat(np.arange(len(JN)), JN.shape[1]), JN.ravel()), WT.ravel()); return W
 def deform(P, W, S):
