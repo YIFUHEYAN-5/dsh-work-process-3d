@@ -121,7 +121,7 @@ test('labels and hover targets match the naming table', async () => {
   const world = buildWorld(null, 'medium', { environment: false, demo: true });
   const stations = STATION_ORDER.map((k) => `station:${k}`);
   const anchors = new Set(world.labelAnchors.map((a) => a.id));
-  for (const id of ['tank', 'engine', 'robot', 'loadport', 'stocker', ...stations]) assert.ok(anchors.has(id), `label anchor ${id}`);
+  for (const id of ['tank', 'engine', 'robot', 'loadport', 'stocker', 'living', ...stations]) assert.ok(anchors.has(id), `label anchor ${id}`);
   const named = new Set([...Object.keys(MACHINE_INFO), ...stations]);
   for (const o of world.hoverTargets()) {
     const id = String(o.userData.hoverId);
@@ -136,7 +136,11 @@ test('machines stand on the floating islands inside the atrium', async () => {
   const world = buildWorld(null, 'medium', { environment: false });
   world.update(1 / 60, 0);
   world.scene.updateMatrixWorld(true);
-  for (const a of world.labelAnchors) assert.ok(sdIslands(a.anchor.x, a.anchor.z) < 0, `${a.id} is above an island`);
+  // Machine labels hang over the islands; the living quarters stand on the outer floor behind the media wall.
+  for (const a of world.labelAnchors) {
+    if (a.id === 'living') assert.ok(sdWell(a.anchor.x, a.anchor.z) > 0, 'living is outside the well');
+    else assert.ok(sdIslands(a.anchor.x, a.anchor.z) < 0, `${a.id} is above an island`);
+  }
   // Everything that stands on the floor must stand on an island (5 cm tolerance).
   const box = new THREE.Box3();
   const machines = new Set(['fuel', 'engine', 'cell', 'stations', 'stocker']);

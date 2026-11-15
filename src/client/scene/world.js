@@ -13,6 +13,7 @@ import { createWaferKit } from './wafer.js';
 import { createDirector } from './director.js';
 import { buildScreens } from './screens.js';
 import { buildChannels } from './channels.js';
+import { buildLiving } from './living.js';
 import { solidsFromScene } from './camspace.js';
 import { disposeTree, damp, clamp } from './util.js';
 import { priceFor, isPeak, affordableTokens } from '../../model/pricing.js';
@@ -27,6 +28,8 @@ export const CAMERA_PRESETS = {
   products: { pos: [6.1, 2.9, 5.6], target: [8.3, 1.1, 0.4] },
   // Standing at the balcony rail, looking out over the city toward the setting sun.
   balcony: { pos: [0.5, 1.7, 23.4], target: [-7.0, -0.4, 41.8], mode: 'look' },
+  // Behind the media wall: the living quarters, seen from the right with the city behind.
+  living: { pos: [5.6, 3.3, -14.6], target: [0.5, 0.9, -17.2] },
 };
 
 /**
@@ -98,9 +101,10 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
   const stocker = buildStocker(M, wafers);
   const screens = buildScreens(M, null, { demo });
   const channels = buildChannels();
+  const living = buildLiving(M);
   const dynamic = new THREE.Group();
   dynamic.name = 'wafers';
-  scene.add(stage.root, channels.root, screens.root, fuel.root, engine.root, cell.root, stations.root, stocker.root, fx.root, dynamic);
+  scene.add(stage.root, channels.root, screens.root, fuel.root, engine.root, cell.root, stations.root, stocker.root, living.root, fx.root, dynamic);
   const director = createDirector({ cell, stations, stocker, engine, wafers, root: dynamic });
   // Wafers and FOUPs are created later and stay in the reflection.
   const reflectTrimmed = reflTier ? trimReflection(scene, REFLECT_MIN_RADIUS) : 0;
@@ -109,7 +113,7 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
   const solids = solidsFromScene(scene);
 
   const staticHover = [];
-  for (const h of [...fuel.hover, ...engine.hover, ...cell.hover, ...stations.list.flatMap((s) => s.hover), ...stocker.hover]) {
+  for (const h of [...fuel.hover, ...engine.hover, ...cell.hover, ...stations.list.flatMap((s) => s.hover), ...stocker.hover, ...living.hover]) {
     h.object.userData.hoverId = h.id;
     staticHover.push(h.object);
   }
@@ -121,6 +125,7 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
     ...stations.list.map((s) => ({ id: `station:${s.kind}`, anchor: s.anchor })),
     { id: 'loadport', anchor: stocker.anchors.loadPort.clone().setY(1.55) },
     { id: 'stocker', anchor: stocker.anchors.stocker.clone().setY(1.25) },
+    { id: 'living', anchor: living.labelAnchor },
   ];
 
   const live = { phase: 'idle', tps: 0, balance: null, currency: 'CNY' };
@@ -189,6 +194,8 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
     presets: CAMERA_PRESETS,
     labelAnchors,
     solids,
+    /** Where a character can sit, sleep, eat, work or stand in the living quarters. */
+    mascotAnchors: living.anchors,
     /** Post-processing settings of the current look and brightness (read by the renderer). */
     get post() {
       return { ...lookDef.post, exposure: lookDef.exposure * bright };
@@ -250,6 +257,7 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
       errorPulse = false;
       director.update(dt, t);
       fx.update(dt);
+      living.update(dt, t);
       updateChannels(dt, flow, phase);
       screenInfo.state = state;
       screenInfo.tps = tps;
@@ -279,6 +287,7 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
     dispose() {
       director.dispose();
       stocker.dispose();
+      living.dispose();
       stage.dispose();
       disposeTree(scene);
       wafers.dispose();

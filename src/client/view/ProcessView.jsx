@@ -16,7 +16,7 @@ const DEMO = true;
 const QUALITY_KEY = 'dwp3d.quality';
 const HINT_KEY = 'dwp3d.hint';
 const LOOK_HINT_KEY = 'dwp3d.hint.look';
-const VIEWS = ['overview', 'fuel', 'engine', 'stations', 'products', 'balcony'];
+const VIEWS = ['overview', 'fuel', 'engine', 'stations', 'products', 'living', 'balcony'];
 const LEGEND = ['raw', 'normal', 'gold', 'bad'];
 const PHASE_COLOR = { idle: '#8a93a6', thinking: '#a487ff', reasoning: '#a487ff', generating: '#6f8cff', tool: '#ffb347' };
 const CALL_STATUS = {
@@ -120,6 +120,7 @@ function presetFor(id) {
   if (id === 'tank') return 'fuel';
   if (id === 'engine' || id === 'console' || id === 'dispenser') return 'engine';
   if (id === 'robot' || id === 'lock' || id === 'unload' || id.startsWith('station:')) return 'stations';
+  if (id === 'living') return 'living';
   return 'products';
 }
 
@@ -161,6 +162,7 @@ function labelSpec(lang) {
     ...STATION_ORDER.map((k) => ({ id: `station:${k}`, text: nameOf(STATION_INFO[k], lang), sub: STATION_INFO[k].code })),
     machine('loadport'),
     machine('stocker'),
+    machine('living'),
   ];
 }
 
@@ -213,6 +215,7 @@ function tipFor(id, d) {
     case 'robot':
     case 'lock':
     case 'unload':
+    case 'living':
       return machine(id);
     case 'stocker': {
       const done = s.turns.filter((x) => x.status !== 'running');

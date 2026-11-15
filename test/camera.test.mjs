@@ -125,3 +125,54 @@ test('orbit targets are kept off the walls', () => {
   const t = space.keepClear(arcPoint(MID, 12.5, 4), TARGET_CLEARANCE);
   assert.equal(space.contains(t, TARGET_CLEARANCE - 1e-3), false);
 });
+
+test('the living quarters fit behind the media wall and offer anchor points', () => {
+  const living = world.scene.getObjectByName('living');
+  assert.ok(living, 'living group');
+  world.scene.updateMatrixWorld(true);
+  const rOf = (x, z) => Math.hypot(x - ATRIUM.cx, z - ATRIUM.cz);
+  // Every vertex stays between the back of the media wall and the glass, and below the wall top.
+  const v = new THREE.Vector3();
+  let rMin = Infinity;
+  let rMax = 0;
+  let yMax = -Infinity;
+  living.traverse((o) => {
+    if (!o.isMesh || o.isInstancedMesh) return;
+    const pos = o.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+      const r = rOf(v.x, v.z);
+      rMin = Math.min(rMin, r);
+      rMax = Math.max(rMax, r);
+      yMax = Math.max(yMax, v.y);
+    }
+  });
+  assert.ok(rMin > MEDIA.back + 0.5, `clear of the wall (${rMin.toFixed(2)})`);
+  assert.ok(rMax < ATRIUM.r - 0.6, `inside the glass (${rMax.toFixed(2)})`);
+  assert.ok(yMax < MEDIA.top, `lower than the media wall (${yMax.toFixed(2)})`);
+
+  const poses = new Set(['sit', 'sleep', 'eat', 'work', 'stand']);
+  assert.equal(world.mascotAnchors.length, 7);
+  for (const a of world.mascotAnchors) {
+    assert.ok(poses.has(a.pose), `${a.id} pose`);
+    assert.ok(Number.isFinite(a.yaw), `${a.id} yaw`);
+    const r = rOf(a.position.x, a.position.z);
+    assert.ok(r > MEDIA.back + 0.5 && r < ATRIUM.r - 0.6, `${a.id} stands in the living area (${r.toFixed(2)})`);
+    assert.ok(a.position.y >= 0 && a.position.y < 1, `${a.id} height`);
+  }
+  for (const id of ['living:bed', 'living:kitchen', 'living:aquarium', 'living:bookshelf', 'living:desk']) solid(id);
+
+  // The preset frames it from inside the hall with nothing in the way.
+  const P = world.presets.living;
+  const pos = new THREE.Vector3().fromArray(P.pos);
+  const tgt = new THREE.Vector3().fromArray(P.target);
+  assert.equal(cameraRegion(pos), 'hall');
+  assert.equal(space.contains(pos), false);
+  assert.ok(rOf(tgt.x, tgt.z) <= CAMERA_LIMIT.targetR, 'target within the orbit limit');
+  const dir = pos.clone().sub(tgt);
+  const L = dir.length();
+  dir.normalize();
+  assert.ok(near(space.armLength(tgt, dir, L), L, 1e-3), 'clear line of sight');
+  assert.ok(world.labelAnchors.some((l) => l.id === 'living'), 'label');
+  assert.ok(world.hoverTargets().some((o) => o.userData.hoverId === 'living'), 'hover');
+});
