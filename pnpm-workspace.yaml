@@ -1,0 +1,6 @@
+# pnpm settings for this repository.
+# pnpm 11 stops an install when a dependency's build script is neither allowed
+# nor denied. esbuild's postinstall only re-links its native binary, and the
+# build works without it, so the script stays disabled.
+allowBuilds:
+  esbuild: false
