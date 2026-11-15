@@ -603,6 +603,7 @@ function buildStation(M, kind, index, fx) {
   const theta = stationTheta(index);
   const pos = ringPos(theta, RING_R);
   const root = group(`station-${kind}`, [pos.x, 0, pos.z], [0, yawFacingHub(theta), 0]);
+  root.userData.solid = `station:${kind}`; // the camera keeps out (camspace.js)
   const k = new Kit();
   const body = ['engraver', 'press', 'generic', 'terminal'].includes(kind) ? 'graphite' : 'white';
   k.add(body, tf(rbox(1.0, 0.84, 0.8, 0.03), [0, 0.44, -0.15]));

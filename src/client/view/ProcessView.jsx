@@ -587,11 +587,21 @@ export function ProcessView(props) {
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
+  const focusStage = () => {
+    try {
+      if (stageRef.current) stageRef.current.focus({ preventScroll: true });
+    } catch {
+      /* focus is best effort */
+    }
+  };
   const goView = (v) => {
-    if (!sceneRef.current) return;
-    sceneRef.current.setCameraPreset(v);
+    const scene = sceneRef.current;
+    if (!scene) return;
+    scene.setCameraPreset(v);
     setView(v);
     setFollow(false);
+    // Roaming presets (the balcony) walk with the keyboard right away.
+    if (scene.getMode() === 'look') focusStage();
   };
   const toggleFollow = () => {
     const next = !follow;
@@ -670,11 +680,7 @@ export function ProcessView(props) {
     if (m === 'look') {
       setFollow(false);
       // Walking keys go to the stage, so move the focus there right away.
-      try {
-        if (stageRef.current) stageRef.current.focus({ preventScroll: true });
-      } catch {
-        /* focus is best effort */
-      }
+      focusStage();
     }
   };
   const retry = () => setMountKey((k) => k + 1);

@@ -427,6 +427,7 @@ function buildRobot(M) {
 /** World-aligned chamber with a slit door on the track side and one on the hub side. */
 function buildChamber(M, { center, side, zh, en, code, hubDoorX }) {
   const root = group(`chamber-${code}`, [center.x, 0, center.z]);
+  root.userData.solid = `chamber:${code}`; // the camera keeps out (camspace.js)
   const k = new Kit();
   k.add('white', tf(rbox(0.8, 0.8, 0.8, 0.03), [0, 0.42, 0]));
   k.add('rubber', tf(rbox(0.78, 0.04, 0.78, 0.01), [0, 0.02, 0]));

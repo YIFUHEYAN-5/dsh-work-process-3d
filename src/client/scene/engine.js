@@ -52,6 +52,7 @@ function gauge(M, parent, { x, y, r, face }) {
 export function buildEngine(M) {
   const root = group('engine');
   const eng = group('engine-body', [ENGINE_POS.x, 0, ENGINE_POS.z]);
+  eng.userData.solid = 'engine'; // the camera keeps out (camspace.js)
   root.add(eng);
   root.add(blobShadow(M, 4.8, 2.7, [ENGINE_POS.x + 0.35, 0, ENGINE_POS.z], 0.62));
 
@@ -231,6 +232,7 @@ export function buildEngine(M) {
 
   // ---------------------------------------------------------- wafer dispenser
   const disp = group('dispenser', [DISPENSER_POS.x, 0, DISPENSER_POS.z]);
+  disp.userData.solid = 'dispenser';
   root.add(disp);
   const dk = new Kit();
   dk.add('white', tf(rbox(0.5, 1.2, 0.56, 0.03), [0, 0.6, 0]));

@@ -118,6 +118,7 @@ export function buildStocker(M, wafers) {
 
   // ── Load port ────────────────────────────────────────────────
   const port = group('load-port', [LOAD_PORT.x, 0, LOAD_PORT.z]);
+  port.userData.solid = 'load-port'; // the camera keeps out (camspace.js)
   root.add(port);
   const pk = new Kit();
   pk.add('white', tf(rbox(0.56, PORT_TOP - 0.012, 0.62, 0.02), [0, (PORT_TOP - 0.012) / 2, 0]));

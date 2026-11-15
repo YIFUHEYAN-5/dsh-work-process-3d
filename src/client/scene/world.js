@@ -13,6 +13,7 @@ import { createWaferKit } from './wafer.js';
 import { createDirector } from './director.js';
 import { buildScreens } from './screens.js';
 import { buildChannels } from './channels.js';
+import { solidsFromScene } from './camspace.js';
 import { disposeTree, damp, clamp } from './util.js';
 import { priceFor, isPeak, affordableTokens } from '../../model/pricing.js';
 import { formatTokens } from '../format.js';
@@ -104,6 +105,8 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
   // Wafers and FOUPs are created later and stay in the reflection.
   const reflectTrimmed = reflTier ? trimReflection(scene, REFLECT_MIN_RADIUS) : 0;
   const reflCam = { frame: 0, matrix: new THREE.Matrix4(), proj: new THREE.Matrix4(), ready: false };
+  // Boxes the camera keeps out of (machines tagged userData.solid), measured once.
+  const solids = solidsFromScene(scene);
 
   const staticHover = [];
   for (const h of [...fuel.hover, ...engine.hover, ...cell.hover, ...stations.list.flatMap((s) => s.hover), ...stocker.hover]) {
@@ -185,6 +188,7 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
     key: stage.key,
     presets: CAMERA_PRESETS,
     labelAnchors,
+    solids,
     /** Post-processing settings of the current look and brightness (read by the renderer). */
     get post() {
       return { ...lookDef.post, exposure: lookDef.exposure * bright };
