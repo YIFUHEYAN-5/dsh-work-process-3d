@@ -30,7 +30,7 @@ function connect(wsUrl) {
 }
 export function pageUrl(page, query = {}) { return pathToFileURL(path.join(HERE, page)).href + '?' + new URLSearchParams(query).toString(); }
 // Renders url at width x height, waits until document.title starts with READY or ERROR, writes the PNG.
-export async function shot({ url, width, height, out, timeout = 60000 }) {
+export async function shot({ url, width, height, out, timeout = 120000 }) {
   await ensureEdge();
   const t = await (await fetch('http://127.0.0.1:' + PORT + '/json/new?about:blank', { method: 'PUT' })).json();
   const c = await connect(t.webSocketDebuggerUrl);
@@ -49,7 +49,7 @@ export async function shot({ url, width, height, out, timeout = 60000 }) {
     const png = path.isAbsolute(out) ? out : path.join(HERE, 'out', out);
     fs.mkdirSync(path.dirname(png), { recursive: true });
     fs.writeFileSync(png, Buffer.from(s.result.data, 'base64'));
-    return { png, title, ms: Date.now() - t0, logs: c.logs.slice(0, 20) };
+    return { png, title, ms: Date.now() - t0, logs: c.logs };
   } finally {
     c.ws.close();
     await fetch('http://127.0.0.1:' + PORT + '/json/close/' + t.id).catch(() => {});
@@ -65,7 +65,8 @@ export async function closeEdge() {
 export async function turntable(query, out) {
   const views = (query.views || 'front,34,side,back').split(',');
   const rows = +(query.rows || 1), tile = +(query.tile || 480), aspect = +(query.aspect || 1.6);
-  return shot({ url: pageUrl('turntable.html', query), width: Math.ceil(views.length / rows) * tile, height: rows * Math.round(tile * aspect), out });
+  const n = query.times ? String(query.times).split(',').length : views.length;
+  return shot({ url: pageUrl('turntable.html', query), width: Math.ceil(n / rows) * tile, height: rows * Math.round(tile * aspect), out });
 }
 
 // CLI: node cdp.mjs <out.png> "<query>"   (out is relative to preview/out/)
