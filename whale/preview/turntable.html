@@ -1,0 +1,104 @@
+<!doctype html>
+<!-- 多视角预览页。需要从仓库根目录用 HTTP 服务打开（或用 cdp.mjs 无头渲染），three 来自根目录 node_modules。
+  glb=GLB 路径（相对本页）  tail=1 归一化身体并加程序化尾巴  mode=toon|flat  vib=蓝色加饱和度  ow=描边宽度(米)
+  crown=x,y,z 呆毛位置  ac0/ac1=呆毛颜色  t/sway/swing/curl=尾巴姿态  spine=尾巴脊线 JSON
+  views=front,34,side,back,34b,left,34l  tile=每格宽度  aspect=格子高宽比  rows  elev=相机高度  region=a0,a1 只取身高的这一段  rot=绕 Y 旋转(度)  info=右下角文字
+  test=tail 只看尾巴（proxy=0 去掉灰色替身） -->
+<html><head><meta charset="utf-8"><title>turntable</title>
+<style>html,body{margin:0;background:#e9edf5;overflow:hidden;font-family:"Microsoft YaHei",sans-serif}
+#labels div{position:absolute;color:#1c2350;font-size:22px;padding:6px 10px}</style>
+<script type="importmap">{"imports":{
+"three":"../../node_modules/three/build/three.module.js",
+"three/addons/":"../../node_modules/three/examples/jsm/"}}</script>
+</head><body><div id="labels"></div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+const q = new URLSearchParams(location.search);
+const views = (q.get('views') || 'front,34,side,back').split(',');
+const tile = +(q.get('tile') || 480), rows = +(q.get('rows') || 1);
+const cols = Math.ceil(views.length / rows);
+const W = cols * tile, H = rows * Math.round(tile * (+(q.get('aspect') || 1.6)));
+const TH = H / rows;
+const ANG = { front: 0, '34': 35, side: 90, back: 180, '34b': 145, left: -90, '34l': -35 };
+const NAME = { front: '正面', '34': '3/4', side: '侧面', back: '背面', '34b': '后 3/4', left: '另一侧', '34l': '3/4（另一侧）' };
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1); renderer.setSize(W, H);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setScissorTest(true);
+document.body.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8890a8, 2.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(1.5, 3, 2.5); scene.add(sun);
+let model;
+async function load() {
+  const glb = q.get('glb');
+  if (glb) {
+    const l = new GLTFLoader(); l.setMeshoptDecoder(MeshoptDecoder);
+    const g = await l.loadAsync(glb);
+    model = g.scene;
+    if (q.get('mode') === 'flat') model.traverse(o => { if (o.isMesh) { const m = o.material; o.material = new THREE.MeshBasicMaterial({ map: m.map || null, color: m.map ? 0xffffff : (m.color || 0xcccccc), side: THREE.DoubleSide }); } });
+    if (q.get('tail')) {
+      // normalise the Tripo body (faces +x, centred) to the tail's frame: faces +z, feet on y = 0, 1.35 m tall
+      const body = model; body.rotation.y = -Math.PI / 2; body.updateMatrixWorld(true);
+      let bb = new THREE.Box3().setFromObject(body);
+      body.scale.setScalar(1.35 / (bb.max.y - bb.min.y)); body.updateMatrixWorld(true);
+      bb = new THREE.Box3().setFromObject(body); body.position.y -= bb.min.y; body.updateMatrixWorld(true);
+      const ow = +(q.get('ow') || 0.0022), T = await import('../src/toon.js'), { createTail } = await import('../src/tail.js');
+      let opt = {};
+      if (q.get('mode') === 'toon') { T.applyToon(body, { outline: ow, vib: +(q.get('vib') || 0) }); opt = { material: T.toonMaterial({ vertexColors: true }), outline: T.outlineMaterial({ width: ow }) }; }
+      else if (q.get('mode') === 'flat') opt = { material: new THREE.MeshBasicMaterial({ vertexColors: true }), outline: T.outlineMaterial({ width: ow }) };
+      if (q.get('spine')) opt.spine = JSON.parse(q.get('spine'));
+      const tail = createTail(opt);
+      tail.update(+(q.get('t') || 0.55), { sway: +(q.get('sway') ?? 0.1), swing: +(q.get('swing') ?? 0.035), curl: +(q.get('curl') || 0) });
+      model = new THREE.Group(); model.add(body, tail.root);
+      if (q.get('crown')) {
+        const { createAhoge } = await import('../src/ahoge.js');
+        const am = q.get('mode') === 'toon' ? T.toonMaterial({ vertexColors: true, vib: +(q.get('vib') || 0) }) : new THREE.MeshBasicMaterial({ vertexColors: true });
+        const base = q.get('crown').split(',').map(Number); base[1] -= 0.004;
+        model.add(createAhoge({ base, color0: q.get('ac0') || '#2c3f9a', color1: q.get('ac1') || '#5d7fd6', material: am, outline: T.outlineMaterial({ width: 0.0011 }) }).root);
+      }
+    }
+  } else if (q.get('test') === 'tail') {
+    const { createTail } = await import('../src/tail.js');
+    const tail = createTail({});
+    tail.update(+(q.get('t') || 0.55), { sway: +(q.get('sway') ?? 0.1), swing: +(q.get('swing') ?? 0.035), curl: +(q.get('curl') || 0) });
+    model = new THREE.Group(); model.add(tail.root);
+    if (q.get('proxy') !== '0') {
+      const pm = new THREE.MeshStandardMaterial({ color: 0xc3c9d6, transparent: true, opacity: 0.5, depthWrite: false, roughness: 0.9 });
+      const add = (g, x, y, z) => { const m = new THREE.Mesh(g, pm); m.position.set(x, y, z); model.add(m); };
+      for (const s of [-1, 1]) { add(new THREE.CylinderGeometry(0.036, 0.03, 0.42, 20), s * 0.065, 0.27, 0); add(new THREE.BoxGeometry(0.075, 0.06, 0.15), s * 0.065, 0.03, 0.02); }
+      add(new THREE.CylinderGeometry(0.15, 0.31, 0.32, 32, 1, true), 0, 0.6, -0.01);
+      add(new THREE.CylinderGeometry(0.1, 0.13, 0.36, 24), 0, 0.94, 0);
+      add(new THREE.SphereGeometry(0.15, 24, 16), 0, 1.24, 0);
+    }
+  } else {
+    model = new THREE.Mesh(new THREE.TorusKnotGeometry(0.4, 0.13, 160, 24), new THREE.MeshToonMaterial({ color: 0x2f5fd0 }));
+  }
+  const rot = +(q.get('rot') || 0); if (rot) model.rotation.y = THREE.MathUtils.degToRad(rot);
+  scene.add(model); model.updateMatrixWorld(true);
+}
+function frame() {
+  const box = new THREE.Box3().setFromObject(model);
+  const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3());
+  const reg = q.get('region'); if (reg) { const [a0, a1] = reg.split(',').map(Number); const h = s.y * (a1 - a0); c.y = box.min.y + s.y * (a0 + a1) / 2; s.set(Math.min(s.x, h * 1.1), h, Math.min(s.z, h * 1.1)); }
+  const fov = 22, aspect = tile / TH;
+  const cam = new THREE.PerspectiveCamera(fov, aspect, 0.01, 100);
+  const r = Math.max(s.y / 2 / Math.tan(THREE.MathUtils.degToRad(fov / 2)), Math.max(s.x, s.z) / 2 / Math.tan(THREE.MathUtils.degToRad(fov / 2)) / aspect) * 1.12 + Math.max(s.x, s.z) / 2;
+  const lab = document.getElementById('labels');
+  views.forEach((v, i) => {
+    const a = THREE.MathUtils.degToRad(ANG[v] ?? +v);
+    cam.position.set(c.x + Math.sin(a) * r, c.y + (q.get('elev') ? +q.get('elev') * s.y : 0.06 * s.y), c.z + Math.cos(a) * r);
+    cam.lookAt(c); cam.updateProjectionMatrix();
+    const x = (i % cols) * tile, yTop = Math.floor(i / cols) * TH;
+    renderer.setViewport(x, H - yTop - TH, tile, TH); renderer.setScissor(x, H - yTop - TH, tile, TH);
+    renderer.setClearColor(i % 2 ? 0xe3e8f1 : 0xedf0f6); renderer.clear();
+    renderer.render(scene, cam);
+    const d = document.createElement('div'); d.textContent = NAME[v] || v; d.style.left = x + 'px'; d.style.top = yTop + 'px'; lab.appendChild(d);
+  });
+  const info = q.get('info'); if (info) { const d = document.createElement('div'); d.textContent = info; d.style.right = '0'; d.style.bottom = '0'; d.style.fontSize = '16px'; lab.appendChild(d); }
+}
+try { await load(); frame(); document.title = 'READY ' + renderer.info.render.triangles; }
+catch (e) { document.body.innerHTML = '<pre style="font-size:20px;color:#b00">' + (e.stack || e) + '</pre>'; document.title = 'ERROR'; }
+</script></body></html>
