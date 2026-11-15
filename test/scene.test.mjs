@@ -235,6 +235,84 @@ test('looks and brightness change the post settings without a rebuild', () => {
   world.dispose();
 });
 
+test('floor reflections run from the medium tier up and skip small parts', () => {
+  const low = buildWorld(null, 'low', { environment: false });
+  assert.equal(low.reflectionInfo(), null, 'no mirror pass on low');
+  low.dispose();
+  for (const q of ['medium', 'high', 'ultra']) {
+    const world = buildWorld(null, q, { environment: false });
+    const info = world.reflectionInfo();
+    assert.ok(info && info.strength >= 0.6, `${q}: mirror-like floors`);
+    assert.ok(info.trimmed > 60, `${q}: small meshes leave the reflection pass`);
+    let small = 0;
+    world.scene.traverse((o) => {
+      if (o.isMesh && !o.isInstancedMesh && o.layers.mask & 1) {
+        if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+        if (o.geometry.boundingSphere.radius * o.matrixWorld.getMaxScaleOnAxis() < 0.15) small += 1;
+      }
+    });
+    assert.equal(small, 0, `${q}: nothing tiny is mirrored`);
+    world.dispose();
+  }
+});
+
+test('the central robot keeps its reach, wafer height and clearances', async () => {
+  const THREE = await import('three');
+  const cellMod = await import('../src/client/scene/cell.js');
+  const { buildCell, ringPos, ROBOT, HUB, PORT_R, RETRACT_R, LIFT, LOCK_THETA, OUT_THETA } = cellMod;
+  const { stationTheta } = await import('../src/client/scene/stations.js');
+  const { createMaterials } = await import('../src/client/scene/materials.js');
+  const { M } = createMaterials('high');
+  const cell = buildCell(M);
+  const R = cell.robot;
+  const body1 = R.parts.link1.getObjectByName('link1:white');
+  const body2 = R.parts.link2.getObjectByName('link2:white');
+  const plate = R.parts.fork.getObjectByName('fork:carbon');
+  assert.ok(body1 && body2 && plate, 'robot parts are named');
+  const v = new THREE.Vector3();
+  const p = new THREE.Vector3();
+  // World-space height range and largest distance from the hub axis over all vertices.
+  const extent = (m) => {
+    const pos = m.geometry.attributes.position;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    let maxR = 0;
+    for (let i = 0; i < pos.count; i++) {
+      v.fromBufferAttribute(pos, i).applyMatrix4(m.matrixWorld);
+      minY = Math.min(minY, v.y);
+      maxY = Math.max(maxY, v.y);
+      maxR = Math.max(maxR, Math.hypot(v.x - HUB.x, v.z - HUB.z));
+    }
+    return { minY, maxY, maxR };
+  };
+  const thetas = [LOCK_THETA, OUT_THETA, ...Array.from({ length: 10 }, (_, i) => stationTheta(i))];
+  for (const theta of thetas) {
+    R.setPose(theta, PORT_R, LIFT);
+    R.carryPoint(p);
+    const port = ringPos(theta, PORT_R);
+    assert.ok(Math.hypot(p.x - port.x, p.z - port.z) < 1e-6, 'the fork centres the wafer over the port');
+    assert.ok(Math.abs(p.y - (0.921 + LIFT)) < 1e-9, 'the wafer height is unchanged');
+    for (const reach of [RETRACT_R, (RETRACT_R + PORT_R) / 2, PORT_R]) {
+      for (const lift of [-0.006, 0.132]) {
+        R.setPose(theta, reach, lift);
+        cell.root.updateMatrixWorld(true);
+        const e1 = extent(body1);
+        const e2 = extent(body2);
+        const ef = extent(plate);
+        assert.ok(e1.minY > ROBOT.drumTop, 'link 1 clears the drum');
+        assert.ok(e2.minY > e1.maxY, 'link 2 rides above link 1');
+        assert.ok(e2.maxR < PORT_R - 0.17, 'link 2 stays clear of the port pedestals');
+        R.carryPoint(p);
+        assert.ok(ef.maxY < p.y - 0.0025, 'the fork stays under the carried wafer');
+      }
+    }
+  }
+  for (const a of ['idle', 'home', 'deliver', 'collect']) R.setStatus(a, 'LL-1', 'ST-03', 'gold');
+  R.setStatus('collect', 'ST-03', 'UL-1', 'bad');
+  R.setBusy(true);
+  assertFinite(cell.root);
+});
+
 test('first sync places history without animation and survives a reset', () => {
   const demo = createDemo({});
   const state = reduceAll(initialState(), demo.prefill(2));

@@ -546,6 +546,8 @@ export function createFactoryScene(container, opts = {}) {
 
   // ── Pointer: hover and click ────────────────────────────────
   const raycaster = new THREE.Raycaster();
+  // Small parts live on the main-camera-only layer (kept out of the floor reflection); still pickable.
+  raycaster.layers.enable(NO_REFLECT_LAYER);
   const ndc = new THREE.Vector2();
   let pointer = null;
   let hoverDirty = false;
