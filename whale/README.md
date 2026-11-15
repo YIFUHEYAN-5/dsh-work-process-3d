@@ -1,6 +1,6 @@
 # DeepSeek 鲸鱼娘 3D 形象（开发中）
 
-DeepSeek 的拟人化形象「蓝色大肥鱼」（女仆装鲸鱼娘），准备做成工作进程 3D 视图里可以简单互动的角色。代码和资源暂时只放在 `whale/` 目录下，还没有接入场景，插件的构建、发布文件和 `dist/client.js` 都不受影响。`test/whale.test.mjs` 检查这里的绑骨模型和尾巴。
+DeepSeek 的拟人化形象「蓝色大肥鱼」（女仆装鲸鱼娘），准备做成工作进程 3D 视图里可以简单互动的角色。代码和资源暂时只放在 `whale/` 目录下，还没有接入场景，插件的构建、发布文件和 `dist/client.js` 都不受影响。`test/whale.test.mjs` 检查这里的绑骨模型、尾巴和离线预览的打包。
 
 ![四视图](docs/turnaround.webp)
 
@@ -11,6 +11,7 @@ DeepSeek 的拟人化形象「蓝色大肥鱼」（女仆装鲸鱼娘），准�
 - [x] 尾巴和呆毛：程序生成（`src/tail.js`、`src/ahoge.js`）
 - [x] 着色：赛璐璐两色调 + 边缘光 + 描边（`src/toon.js`）
 - [x] 绑骨和 10 个预设动作：Tripo 自动绑骨 v1.0，蒙皮权重重新修过（`assets/whale_rigged.glb`）
+- [x] 离线预览：打包成一个双击就能打开的 HTML 文件（`viewer/`）
 - [ ] 脸部贴片：程序绘制的大眼睛和嘴，支持眨眼和 ^^、💢、犯困等表情
 - [ ] 交互：悬停注视、摸头、点身体生气、点尾巴受惊、双击吃白饭、30 秒无操作犯困
 - [ ] 接入场景：模型打包进懒加载的 `dist/client.whale.js`（插件资源路由只提供 svg/png/webp/jpg，不能直接放 .glb）
@@ -25,6 +26,7 @@ DeepSeek 的拟人化形象「蓝色大肥鱼」（女仆装鲸鱼娘），准�
 | `src/ahoge.js` | `createAhoge()`：从头顶长出、向前卷的呆毛 |
 | `preview/turntable.html` | 多视角预览页，可以按时间点摆出动作，参数写在文件开头的注释里 |
 | `preview/cdp.mjs` | 用无头 Edge 渲染预览页并截图 |
+| `viewer/` | 离线预览：`build.mjs` 打包，`main.js` 页面逻辑，`issues.js` 问题定位列表，`viewer.html` 页面模板 |
 | `assets/whale_rigged.glb` | 绑骨模型：41 根骨骼、10 个动作、修过的蒙皮权重，75,585 个三角面，2048² 底色贴图，4.4 MB |
 | `assets/whale_body.glb` | Tripo 生成的身体（未绑骨）：75,753 个三角面，4096² 贴图 |
 | `assets/landmarks.json` | 在归一化坐标里测得的头顶位置和头发颜色 |
@@ -101,6 +103,27 @@ Tripo v1.0 自动绑骨的权重在大动作里变形严重。A 字姿势里手�
 - 表里的最大拉伸倍数来自胸口（`Spine02` 附近）和左腋下的少数三角形。
 
 ## 预览
+
+### 离线预览
+
+`viewer/build.mjs` 把 three.js、预览代码和绑骨模型打包成一个 HTML 文件，双击就能在浏览器里打开，不需要联网，也不需要启动服务器：
+
+```
+node whale/viewer/build.mjs
+```
+
+输出 `whale/viewer/out/whale_viewer.html`（约 8.3 MB，不提交）。如果有 `whale/tripo/raw/anim_test_idle_greet.glb`（`tripo/rig.mjs` 下载的文件，也可以用 `--tripo <文件>` 指定），文件里会带上 Tripo 原始权重，页面上可以和修复后的权重来回切换；没有这个文件时只有修复后的权重，文件约 6.6 MB。
+
+页面上可以：
+
+- 播放 10 个动作或停在绑定姿势，拖时间轴，用 ←/→ 逐帧，慢放到 0.25×。
+- 切换卡通着色、原贴图和变形热图。热图的颜色和左上角的三角形计数与上面「蒙皮权重」一节用同一个标准，同一帧的数字和表里一致。
+- 切换修复后和 Tripo 原始权重，开关描边、尾巴、呆毛和骨骼，切换视角。
+- 点「问题定位」里的条目，直接跳到能看到这个问题的动作、时间和视角。
+
+URL 参数（`clip`、`t`、`shade`、`w`、`view`、`issue` 等）写在 `viewer/main.js` 开头。
+
+### 预览页
 
 1. 在仓库根目录运行 `pnpm install`（预览页用的是 devDependencies 里的 three）。
 2. 在仓库根目录启动静态文件服务，例如 `python -m http.server 8000`。
