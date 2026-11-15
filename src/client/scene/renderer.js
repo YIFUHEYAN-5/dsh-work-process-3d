@@ -5,13 +5,28 @@ import { createPost } from './post.js';
 import { BACKGROUND } from './environment.js';
 import { NO_REFLECT_LAYER } from './reflection.js';
 import { ATRIUM, CAMERA_LIMIT, cameraRegion } from './layout.js';
+import {
+  SCREEN_MIN_D,
+  screenAngle,
+  screenFit as fitScreen,
+  screenPanLimits,
+  screenPosition,
+  screenYaw,
+} from './screenview.js';
 import { BRIGHTNESS, DEFAULT_LOOK, LOOK_IDS } from './looks.js';
 import { createLookControls } from './controls.js';
 import { createCameraSpace, CAMERA_PAD, TARGET_CLEARANCE } from './camspace.js';
 import { angleLerp, clamp, damp, easeInOut, lerp } from './util.js';
 
-/** Camera modes: orbit around a target, or roam freely (look around, walk). */
+/**
+ * Camera modes the user picks: orbit around a target, or roam freely (look around, walk).
+ * A third, internal mode 'screen' holds the camera square in front of a media-wall screen.
+ */
 export const CAMERA_MODES = ['orbit', 'look'];
+
+// Screen close-up.
+const SCREEN_EASE = 12;
+const SCREEN_DETAIL = 2; // canvas resolution of the screen in close-up
 
 export const QUALITY_TIERS = ['low', 'medium', 'high', 'ultra'];
 /** Frame-rate caps offered to the user; 0 means "as fast as the display refreshes". */
@@ -135,13 +150,14 @@ function createGpuTimer(gl) {
  * Mount the factory into `container` (which must be position: relative and sized).
  * opts: { quality ('auto' | tier), fps ('auto' | 30 | 60 | 120 | 0), demo, look ('dusk' | 'day'),
  *         brightness (0.6..1.6), onHover, onSelect, onPerf, onError, onFocus, onActive, onReady,
- *         onMode(mode) }.
+ *         onMode(mode), onScreen(id | null) }.
+ * onMode reports 'orbit', 'look' or 'screen'; onScreen the media-wall screen in close-up.
  * onPerf receives once per second: { fps, target, slow, scale, minScale, cpuMs, gpuMs, calls, triangles, width, height, cap }.
  * The container receives keyboard focus for the roaming camera, so give it a tabIndex.
  * Returns a controller; call dispose() when the view unmounts.
  */
 export function createFactoryScene(container, opts = {}) {
-  const { onHover, onSelect, onPerf, onError, onFocus, onActive, onReady, onMode } = opts;
+  const { onHover, onSelect, onPerf, onError, onFocus, onActive, onReady, onMode, onScreen } = opts;
   const demo = !!opts.demo;
   const reduceMotion = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -454,6 +470,13 @@ export function createFactoryScene(container, opts = {}) {
     camera.updateProjectionMatrix();
     viewCam.updateProjectionMatrix();
     overviewDist = 0;
+    if (scr.def) {
+      // Refit the close-up: it should still show the whole screen at the widest zoom.
+      const wasFit = Math.abs(scr.td - scr.fit) < 1e-3;
+      scr.fit = screenFit(scr.def);
+      if (wasFit) scr.td = scr.fit;
+      clampScreen();
+    }
   }
 
   // ── Camera ───────────────────────────────────────────────────
@@ -491,15 +514,22 @@ export function createFactoryScene(container, opts = {}) {
     if (m === camMode) return;
     adoptView();
     zoom.log = 0;
+    const wasScreen = camMode === 'screen';
     camMode = m;
     if (m === 'look') {
       follow = false;
       controls.enabled = false;
       roam.enable();
+    } else if (m === 'screen') {
+      follow = false;
+      controls.enabled = false;
+      roam.disable();
     } else {
       roam.disable();
       controls.enabled = true;
     }
+    labelLayer.style.visibility = m === 'screen' ? 'hidden' : '';
+    if (wasScreen) leaveScreen();
     if (onMode) onMode(m);
   }
   /** Leave roaming: orbit around the point straight ahead, or fly back in from the balcony. */
@@ -532,7 +562,7 @@ export function createFactoryScene(container, opts = {}) {
     }
     resetArm();
   }
-  // The flight interpolates position and yaw/pitch (no roll) in both modes; an orbit flight
+  // The flight interpolates position and yaw/pitch (no roll) in every mode; an orbit flight
   // hands the target to OrbitControls when it lands.
   function flyTo(name, d = 1.2) {
     if (reduceMotion) {
@@ -543,20 +573,129 @@ export function createFactoryScene(container, opts = {}) {
     zoom.log = 0;
     const { pos, target, mode } = presetPose(name);
     applyMode(mode);
-    _euler.setFromQuaternion(camera.quaternion, 'YXZ');
     const a = aimAngles(pos, target);
+    flyPose(pos, a.yaw, a.pitch, target, mode, d);
+  }
+  function flyPose(pos, yaw1, pitch1, target, mode, d = 1.2) {
+    _euler.setFromQuaternion(camera.quaternion, 'YXZ');
     tween = {
       t: 0,
-      d,
+      d: reduceMotion ? 1e-3 : d,
       p0: camera.position.clone(),
-      p1: pos,
+      p1: pos.clone(),
       yaw0: _euler.y,
       pitch0: _euler.x,
-      yaw1: a.yaw,
-      pitch1: a.pitch,
+      yaw1,
+      pitch1,
       target,
       mode,
     };
+  }
+
+  // ── Screen close-up ─────────────────────────────────────────
+  // Clicking a media-wall screen (or the 大屏 view) flies the camera square in front of it and
+  // redraws that screen at twice the resolution. The wheel zooms toward the pointer, dragging
+  // pans across the screen; clicking beside it, or 返回, flies back to where the camera was.
+  // The camera pose is (u, v, d): offsets along the screen's right and up axes and the
+  // distance from the screen centre, eased toward targets (tu, tv, td).
+  // u runs along the curved screen (arc length), so panning slides the camera around the
+  // wall at a constant distance and it always looks straight at the screen.
+  const scr = { id: null, def: null, u: 0, v: 0, d: 0, tu: 0, tv: 0, td: 0, fit: 0, back: null, moving: false };
+  const _sp = new THREE.Vector3();
+  const screenDefs = () => (world && world.screenDefs) || [];
+  const screenDef = (id) => screenDefs().find((s) => s.id === id) || null;
+  const halfTan = () => Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const screenFit = (def) => fitScreen(def, camera.fov, camera.aspect);
+  function clampScreen() {
+    const def = scr.def;
+    if (!def) return;
+    scr.td = clamp(scr.td, SCREEN_MIN_D, scr.fit * 1.05);
+    const lim = screenPanLimits(def, scr.td, camera.fov, camera.aspect);
+    scr.tu = clamp(scr.tu, -lim.u, lim.u);
+    scr.tv = clamp(scr.tv, -lim.v, lim.v);
+  }
+  const screenPose = (out, u, v, d) => screenPosition(scr.def, u, v, d, out);
+  function focusScreen(id) {
+    const def = screenDef(id);
+    if (!def || !world) return false;
+    if (camMode !== 'screen') {
+      // Come back to what was on screen, not to the pose orbit wanted.
+      adoptView();
+      scr.back = { mode: camMode, pos: camera.position.clone(), quat: camera.quaternion.clone(), target: controls.target.clone() };
+    }
+    follow = false;
+    applyMode('screen');
+    scr.id = id;
+    scr.def = def;
+    scr.fit = screenFit(def);
+    scr.u = scr.tu = 0;
+    scr.v = scr.tv = 0;
+    scr.d = scr.td = scr.fit;
+    scr.moving = false;
+    world.setScreenDetail(id, SCREEN_DETAIL);
+    flyPose(screenPose(_sp, 0, 0, scr.fit), screenYaw(def.a), 0, null, 'screen', 1.0);
+    if (onScreen) onScreen(id);
+    touch();
+    return true;
+  }
+  /** Screen state only; applyMode calls this when the camera leaves the close-up. */
+  function leaveScreen() {
+    scr.id = null;
+    scr.def = null;
+    scr.back = null;
+    scr.moving = false;
+    if (world && world.setScreenDetail) world.setScreenDetail(null, 1);
+    if (onScreen) onScreen(null);
+  }
+  function exitScreen() {
+    if (camMode !== 'screen') return;
+    const back = scr.back;
+    applyMode(back ? back.mode : 'orbit');
+    if (!back) {
+      flyTo('overview');
+      return;
+    }
+    _euler.setFromQuaternion(back.quat, 'YXZ');
+    flyPose(back.pos, _euler.y, _euler.x, back.target, back.mode, 1.0);
+    touch();
+  }
+  function stepScreen(dir) {
+    const list = screenDefs();
+    if (!list.length) return;
+    const i = Math.max(0, list.findIndex((s) => s.id === scr.id));
+    const next = list[(i + dir + list.length) % list.length];
+    focusScreen(next.id);
+  }
+  function updateScreen(dt) {
+    const k = 1 - Math.exp(-SCREEN_EASE * dt);
+    scr.u += (scr.tu - scr.u) * k;
+    scr.v += (scr.tv - scr.v) * k;
+    scr.d += (scr.td - scr.d) * k;
+    scr.moving = Math.abs(scr.tu - scr.u) + Math.abs(scr.tv - scr.v) + Math.abs(scr.td - scr.d) > 1e-3;
+    screenPose(camera.position, scr.u, scr.v, scr.d);
+    setAim(screenYaw(screenAngle(scr.def, scr.u)), 0);
+  }
+  /** Wheel in close-up: zoom about the point under the pointer. */
+  function zoomScreen(step, p) {
+    const tv = halfTan();
+    const th = tv * Math.max(0.2, camera.aspect);
+    const nx = (p.x / width) * 2 - 1;
+    const ny = -(p.y / height) * 2 + 1;
+    const cu = scr.tu + nx * th * scr.td;
+    const cv = scr.tv + ny * tv * scr.td;
+    const d1 = clamp(scr.td * Math.exp(step), SCREEN_MIN_D, scr.fit * 1.05);
+    const k = d1 / scr.td;
+    scr.tu = cu - (cu - scr.tu) * k;
+    scr.tv = cv - (cv - scr.tv) * k;
+    scr.td = d1;
+    clampScreen();
+  }
+  /** Drag in close-up: the screen follows the pointer. */
+  function panScreen(dx, dy) {
+    const k = (2 * scr.td * halfTan()) / Math.max(1, height);
+    scr.tu -= dx * k;
+    scr.tv += dy * k;
+    clampScreen();
   }
   const touch = () => {
     lastInteract = performance.now();
@@ -744,6 +883,15 @@ export function createFactoryScene(container, opts = {}) {
     }
   }
   const onWheel = (e) => {
+    if (camMode === 'screen' && world) {
+      e.preventDefault();
+      e.stopPropagation();
+      const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+      const step = clamp(e.deltaY * unit * ZOOM_RATE, -0.6, 0.6);
+      if (step && !tween && scr.def) zoomScreen(step, local(e));
+      touch();
+      return;
+    }
     if (camMode !== 'orbit' || !world || !controls.enabled) return; // roaming walks with the wheel
     e.preventDefault();
     e.stopPropagation(); // keep OrbitControls' own, undamped wheel zoom out of it
@@ -769,23 +917,43 @@ export function createFactoryScene(container, opts = {}) {
     pointer = local(e);
     hoverDirty = true;
     if (down && Math.hypot(pointer.x - down.x, pointer.y - down.y) > 5) dragging = true;
+    if (down && camMode === 'screen' && !tween && scr.def) {
+      panScreen(pointer.x - down.lx, pointer.y - down.ly);
+      touch();
+    }
+    if (down) {
+      down.lx = pointer.x;
+      down.ly = pointer.y;
+    }
   };
   const onLeave = () => {
     pointer = null;
     hoverDirty = true;
   };
   const onDown = (e) => {
-    down = { ...local(e), t: performance.now() };
+    const p = local(e);
+    down = { ...p, lx: p.x, ly: p.y, t: performance.now() };
     dragging = false;
     touch();
     canvas.style.cursor = 'grabbing';
   };
   const onUp = (e) => {
     const p = local(e);
-    // While roaming, clicks are left to the walk controls (double-click walks to a spot).
-    if (camMode === 'orbit' && down && !dragging && performance.now() - down.t < 450 && onSelect) {
+    const click = down && !dragging && performance.now() - down.t < 450;
+    // A click on a screen opens its close-up in every mode; in the close-up a click beside it
+    // goes back. Otherwise clicks select only while orbiting: roaming leaves them to the walk
+    // controls (double-click walks to a spot), and clicks during a flight are ignored.
+    if (click && !tween) {
       const hit = pick(p);
-      onSelect(hit ? hit.id : null);
+      const sid = hit && String(hit.id).startsWith('screen:') ? String(hit.id).slice(7) : null;
+      if (camMode === 'screen') {
+        if (!sid) exitScreen();
+        else if (sid !== scr.id) focusScreen(sid);
+      } else if (sid) {
+        focusScreen(sid);
+      } else if (camMode === 'orbit' && onSelect) {
+        onSelect(hit ? hit.id : null);
+      }
     }
     down = null;
     dragging = false;
@@ -797,6 +965,15 @@ export function createFactoryScene(container, opts = {}) {
   canvas.addEventListener('pointerleave', onLeave);
   canvas.addEventListener('pointerdown', onDown);
   canvas.addEventListener('pointerup', onUp);
+  // ← / → switch screens in the close-up while the 3D view has the keyboard focus.
+  const onKey = (e) => {
+    if (camMode !== 'screen' || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!tween) stepScreen(e.key === 'ArrowLeft' ? -1 : 1);
+  };
+  container.addEventListener('keydown', onKey);
 
   function attached(o) {
     let p = o;
@@ -811,7 +988,7 @@ export function createFactoryScene(container, opts = {}) {
   function placeHighlight(t) {
     if (!highlight) return;
     const o = hoverObj;
-    if (!o || !attached(o)) {
+    if (!o || o.userData.noHighlight || !attached(o)) {
       highlight.visible = false;
       return;
     }
@@ -841,7 +1018,7 @@ export function createFactoryScene(container, opts = {}) {
   function frameCap() {
     if (capSetting !== 'auto') return capSetting;
     const active =
-      !!tween || follow || !!down || !!zoom.log || arm.easing || roam.active() ||
+      !!tween || follow || !!down || !!zoom.log || arm.easing || roam.active() || scr.moving ||
       performance.now() - lastInteract < 900 || (world && world.busy());
     return active ? ACTIVE_FPS : IDLE_FPS;
   }
@@ -945,7 +1122,7 @@ export function createFactoryScene(container, opts = {}) {
         const done = tween;
         tween = null;
         if (done.mode === 'look') roam.sync();
-        else controls.target.copy(done.target);
+        else if (done.mode === 'orbit') controls.target.copy(done.target);
       }
     } else if (follow && world) {
       focusTimer -= dt;
@@ -978,6 +1155,8 @@ export function createFactoryScene(container, opts = {}) {
         updatePolarLimits();
         controls.update();
         clampTarget();
+      } else if (camMode === 'screen') {
+        if (scr.def) updateScreen(dt);
       } else {
         roam.update(dt);
       }
@@ -989,7 +1168,9 @@ export function createFactoryScene(container, opts = {}) {
     if (hoverDirty && hoverWait <= 0) {
       hoverWait = 0.08;
       hoverDirty = false;
-      const hit = pointer && !down ? pick(pointer) : null;
+      let hit = pointer && !down ? pick(pointer) : null;
+      // The screen in close-up is not a hover target: dragging pans it.
+      if (hit && camMode === 'screen' && hit.id === `screen:${scr.id}`) hit = null;
       const id = hit ? hit.id : null;
       hoverObj = hit ? hit.obj : null;
       if (!down) canvas.style.cursor = id ? 'pointer' : 'grab';
@@ -1080,6 +1261,7 @@ export function createFactoryScene(container, opts = {}) {
     canvas.removeEventListener('webglcontextlost', onLost);
     canvas.removeEventListener('webglcontextrestored', onRestored);
     container.removeEventListener('wheel', onWheel, { capture: true });
+    container.removeEventListener('keydown', onKey);
     controls.dispose();
     roam.dispose();
     try {
@@ -1158,7 +1340,7 @@ export function createFactoryScene(container, opts = {}) {
       touch();
     },
     getMode: () => camMode,
-    /** 'orbit' or 'look' (roaming). onMode also fires when a preset or Follow switches modes. */
+    /** 'orbit' or 'look' (roaming). onMode also fires when a preset, Follow or a screen close-up switches modes. */
     setMode(m) {
       if (!CAMERA_MODES.includes(m) || m === camMode) return;
       tween = null;
@@ -1166,7 +1348,23 @@ export function createFactoryScene(container, opts = {}) {
       else enterOrbit();
       touch();
     },
+    /** Media-wall screens in order, left to right: [{ id, a, ... }]. */
+    screens: () => screenDefs().map((s) => s.id),
+    /** Screen in close-up, or null. */
+    getScreen: () => scr.id,
+    /** Fly square in front of a media-wall screen (sharper text); returns false for an unknown id. */
+    focusScreen: (id) => focusScreen(id),
+    /** Next (+1) or previous (−1) screen while in the close-up. */
+    stepScreen(dir) {
+      if (camMode === 'screen' && !tween) stepScreen(dir < 0 ? -1 : 1);
+    },
+    /** Leave the close-up and fly back to where the camera was. */
+    exitScreen,
     setFollow(on) {
+      if (on && camMode === 'screen') {
+        tween = null;
+        applyMode(scr.back ? scr.back.mode : 'orbit');
+      }
       if (on && camMode !== 'orbit') {
         if (cameraRegion(camera.position) === 'hall') enterOrbit();
         else jumpTo('overview');

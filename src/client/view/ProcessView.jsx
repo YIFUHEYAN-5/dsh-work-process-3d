@@ -234,6 +234,12 @@ function tipFor(id, d) {
     default:
       break;
   }
+  if (id.startsWith('screen:')) {
+    const key = id.slice(7);
+    const desc = { flow: 'screen.descFlow', main: 'screen.descMain', cost: 'screen.descCost' }[key];
+    if (!desc) return null;
+    return { title: t('screen.' + key), body: t(desc), rows: [['', t('screen.click')]] };
+  }
   if (id.startsWith('station:')) {
     const kind = id.slice(8);
     const info = STATION_INFO[kind];
@@ -354,6 +360,33 @@ function Legend({ t, hintOn, hintKey, onDismiss }) {
   );
 }
 
+/** Navigation bar of the media-wall close-up: previous / name i/n / next / back. */
+function ScreenBar({ t, id, ids, onStep, onBack }) {
+  const i = Math.max(0, ids.indexOf(id));
+  const many = ids.length > 1;
+  return (
+    <div className="dwp3d-screenbar-wrap">
+      <div className="dwp3d-panel dwp3d-screenbar" role="toolbar" aria-label={t('screen.bar')}>
+        <button type="button" className="dwp3d-btn" disabled={!many} title={t('screen.prev')} aria-label={t('screen.prev')} onClick={() => onStep(-1)}>
+          ◀
+        </button>
+        <div className="dwp3d-screenbar-name" aria-live="polite">
+          <b>{t('screen.' + id)}</b>
+          <span>{t('screen.count', { i: i + 1, n: ids.length })}</span>
+        </div>
+        <button type="button" className="dwp3d-btn" disabled={!many} title={t('screen.next')} aria-label={t('screen.next')} onClick={() => onStep(1)}>
+          ▶
+        </button>
+        <span className="sep" aria-hidden="true" />
+        <button type="button" className="dwp3d-btn" onClick={onBack}>
+          {t('screen.back')}
+        </button>
+      </div>
+      <p className="dwp3d-screenbar-hint">{t('screen.hint')}</p>
+    </div>
+  );
+}
+
 const canFullscreen = () =>
   typeof document !== 'undefined' && document.fullscreenEnabled !== false
   && typeof HTMLElement !== 'undefined' && typeof HTMLElement.prototype.requestFullscreen === 'function';
@@ -415,6 +448,7 @@ export function ProcessView(props) {
   const [hintOn, setHintOn] = useState(() => readStored(HINT_KEY) !== 'off');
   const [lookHintOn, setLookHintOn] = useState(() => readStored(LOOK_HINT_KEY) !== 'off');
   const [camMode, setCamMode] = useState('orbit');
+  const [screenId, setScreenId] = useState(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [hover, setHover] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -459,6 +493,7 @@ export function ProcessView(props) {
     setRenderWarn(null);
     setHover(null);
     setCamMode('orbit');
+    setScreenId(null);
 
     const onPerf = (stats) => {
       setError((e) => (e && e.kind === 'lost' ? null : e));
@@ -517,7 +552,11 @@ export function ProcessView(props) {
           onReady: () => setLoading(false),
           onMode: (m) => {
             setCamMode(m);
-            if (m === 'look') setFollow(false);
+            if (m === 'look' || m === 'screen') setFollow(false);
+          },
+          onScreen: (id) => {
+            setScreenId(id);
+            if (id) setHover(null);
           },
         });
       } catch (err) {
@@ -605,6 +644,25 @@ export function ProcessView(props) {
     setFollow(false);
     // Roaming presets (the balcony) walk with the keyboard right away.
     if (scene.getMode() === 'look') focusStage();
+  };
+  // 大屏 toggles the media-wall close-up; ← / → in it need the stage focus.
+  const toggleScreens = () => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (scene.getScreen()) {
+      scene.exitScreen();
+      return;
+    }
+    if (scene.focusScreen('main')) {
+      setFollow(false);
+      focusStage();
+    }
+  };
+  const stepScreen = (dir) => {
+    if (sceneRef.current) sceneRef.current.stepScreen(dir);
+  };
+  const exitScreen = () => {
+    if (sceneRef.current) sceneRef.current.exitScreen();
   };
   const toggleFollow = () => {
     const next = !follow;
@@ -775,6 +833,7 @@ export function ProcessView(props) {
   const tipData = { t, s, live, lang, price, peak, m, phase, balance, currency };
   const failed = !!error && error.kind === 'webgl';
   const hud = !loading && !failed;
+  const screenIds = screenId && sceneRef.current ? sceneRef.current.screens() : [];
   const autoLabel = manual ? t('quality.autoPlain') : t('quality.autoOpt', { q: t('quality.' + quality) });
 
   return (
@@ -804,13 +863,22 @@ export function ProcessView(props) {
           <div className="dwp3d-panel dwp3d-tools">
             <div className="dwp3d-seg" role="group" aria-label={t('ctl.views')}>
               {VIEWS.map((v) => {
-                const on = !follow && view === v;
+                const on = !follow && !screenId && view === v;
                 return (
                   <button key={v} type="button" className={`dwp3d-btn${on ? ' on' : ''}`} aria-pressed={on} onClick={() => goView(v)}>
                     {t('view.' + v)}
                   </button>
                 );
               })}
+              <button
+                type="button"
+                className={`dwp3d-btn${screenId ? ' on' : ''}`}
+                title={t('view.screensHint')}
+                aria-pressed={!!screenId}
+                onClick={toggleScreens}
+              >
+                {t('view.screens')}
+              </button>
             </div>
             <div className="dwp3d-seg" role="group" aria-label={t('ctl.mode')}>
               {CAMERA_MODES.map((m) => (
@@ -921,7 +989,9 @@ export function ProcessView(props) {
         {toast ? <div className="dwp3d-panel dwp3d-toast">{toast}</div> : null}
       </div>
 
-      {hud && panelsOn ? (
+      {hud && screenId ? <ScreenBar t={t} id={screenId} ids={screenIds} onStep={stepScreen} onBack={exitScreen} /> : null}
+
+      {hud && panelsOn && !screenId ? (
         <div className="dwp3d-bottom">
           <div className="dwp3d-mid">
             <Ticker t={t} calls={recent} />
@@ -940,7 +1010,7 @@ export function ProcessView(props) {
         </div>
       ) : null}
 
-      {hud && hover ? <Tooltip hover={hover} data={tipData} rootRef={rootRef} /> : null}
+      {hud && hover && !screenId ? <Tooltip hover={hover} data={tipData} rootRef={rootRef} /> : null}
 
       {loading && !error ? (
         <div className="dwp3d-center">

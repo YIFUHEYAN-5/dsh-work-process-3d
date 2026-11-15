@@ -122,9 +122,15 @@ test('labels and hover targets match the naming table', async () => {
   const stations = STATION_ORDER.map((k) => `station:${k}`);
   const anchors = new Set(world.labelAnchors.map((a) => a.id));
   for (const id of ['tank', 'engine', 'robot', 'loadport', 'stocker', 'living', ...stations]) assert.ok(anchors.has(id), `label anchor ${id}`);
+  const { DICTS: LOCALE } = await import('../src/client/locale.js');
+  // Screens are named by the locale (screen.flow / screen.main / screen.cost), the rest by the naming table.
   const named = new Set([...Object.keys(MACHINE_INFO), ...stations]);
   for (const o of world.hoverTargets()) {
     const id = String(o.userData.hoverId);
+    if (id.startsWith('screen:')) {
+      for (const lang of ['zh', 'en']) assert.ok(LOCALE[lang]['screen.' + id.slice(7)], `${id} has a ${lang} name`);
+      continue;
+    }
     assert.ok(named.has(id) || id.startsWith('foup:'), `hover id ${id} has a name`);
   }
   world.dispose();

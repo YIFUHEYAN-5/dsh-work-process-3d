@@ -33,6 +33,7 @@ export const CSS = `
 .dwp3d-btn{appearance:none;border:0;background:transparent;color:#c9d2e3;font:inherit;font-size:12px;height:26px;padding:0 9px;border-radius:5px;cursor:pointer;white-space:nowrap}
 .dwp3d-btn:hover{background:rgba(255,255,255,.09);color:#fff}
 .dwp3d-btn.on{background:#4d6bfe;color:#fff}
+.dwp3d-btn:disabled{opacity:.4;cursor:default;background:transparent}
 .dwp3d-btn:focus-visible,.dwp3d-select:focus-visible,.dwp3d-x:focus-visible{outline:2px solid #8ea2ff;outline-offset:1px}
 .dwp3d-select{appearance:none;-webkit-appearance:none;border:0;font:inherit;font-size:12px;height:26px;padding:0 22px 0 9px;border-radius:6px;color:#c9d2e3;cursor:pointer;background:rgba(255,255,255,.05) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23c9d2e3' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat right 7px center}
 .dwp3d-select option{background:#16191f;color:#e6e9ef}
@@ -85,6 +86,13 @@ export const CSS = `
 .dwp3d-tip .row span:last-child{text-align:right;overflow-wrap:anywhere;min-width:0}
 .dwp3d-toast-wrap{position:absolute;top:54px;left:50%;transform:translateX(-50%);z-index:3;pointer-events:none}
 .dwp3d-toast{padding:6px 12px;font-size:12px;white-space:nowrap}
+.dwp3d-screenbar-wrap{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);z-index:2;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;max-width:calc(100% - 20px)}
+.dwp3d-screenbar{display:flex;align-items:center;gap:4px;padding:4px;pointer-events:auto}
+.dwp3d-screenbar-name{display:flex;align-items:baseline;gap:8px;padding:0 10px;min-width:150px;justify-content:center;white-space:nowrap}
+.dwp3d-screenbar-name b{font-size:12.5px;font-weight:650;color:#f3f5fa}
+.dwp3d-screenbar-name span{font-size:11px;color:#9aaacb;font-variant-numeric:tabular-nums}
+.dwp3d-screenbar .sep{width:1px;height:18px;background:rgba(255,255,255,.12);margin:0 2px}
+.dwp3d-screenbar-hint{margin:0;padding:3px 10px;border-radius:6px;background:rgba(12,14,19,.5);font-size:11px;color:#b8c3d8;text-align:center}
 .dwp3d-center{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;z-index:5}
 .dwp3d-center.dim{background:rgba(5,6,8,.55)}
 .dwp3d-loading{display:flex;align-items:center;gap:10px;padding:12px 16px;font-size:12.5px;color:#d6deec}
@@ -110,7 +118,8 @@ export const CSS = `
 @container dwp3d (max-width: 520px){
   .dwp3d-title h2{display:none}
   .dwp3d-btn{padding:0 7px}
-  .dwp3d-hint{display:none}
+  .dwp3d-hint,.dwp3d-screenbar-hint{display:none}
+  .dwp3d-screenbar-name{min-width:0}
 }
 @container dwp3d (max-width: 420px){
   .dwp3d-cards{grid-template-columns:repeat(2,minmax(0,1fr))}

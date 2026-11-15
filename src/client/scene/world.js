@@ -11,7 +11,7 @@ import { buildStocker } from './stocker.js';
 import { createEffects } from './effects.js';
 import { createWaferKit } from './wafer.js';
 import { createDirector } from './director.js';
-import { buildScreens } from './screens.js';
+import { buildScreens, SCREENS } from './screens.js';
 import { buildChannels } from './channels.js';
 import { buildLiving } from './living.js';
 import { solidsFromScene } from './camspace.js';
@@ -113,7 +113,7 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
   const solids = solidsFromScene(scene);
 
   const staticHover = [];
-  for (const h of [...fuel.hover, ...engine.hover, ...cell.hover, ...stations.list.flatMap((s) => s.hover), ...stocker.hover, ...living.hover]) {
+  for (const h of [...fuel.hover, ...engine.hover, ...cell.hover, ...stations.list.flatMap((s) => s.hover), ...stocker.hover, ...living.hover, ...screens.hover]) {
     h.object.userData.hoverId = h.id;
     staticHover.push(h.object);
   }
@@ -196,6 +196,10 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
     solids,
     /** Where a character can sit, sleep, eat, work or stand in the living quarters. */
     mascotAnchors: living.anchors,
+    /** Media-wall screens, left to right as seen from the hall: { id, a, a0, a1, y0, y1, w, h, px }. */
+    screenDefs: SCREENS,
+    /** Draw `id` at `scale`× resolution for a close-up (null puts every screen back to 1×). */
+    setScreenDetail: (id, scale = 2) => screens.setDetail(id, scale),
     /** Post-processing settings of the current look and brightness (read by the renderer). */
     get post() {
       return { ...lookDef.post, exposure: lookDef.exposure * bright };
