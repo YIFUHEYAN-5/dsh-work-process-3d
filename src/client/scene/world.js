@@ -5,7 +5,7 @@ import { createReflection, NO_REFLECT_LAYER } from './reflection.js';
 import { BRIGHTNESS, DEFAULT_LOOK, lookOf } from './looks.js';
 import { buildFuel, TANK_POS } from './fuel.js';
 import { buildEngine } from './engine.js';
-import { buildCell } from './cell.js';
+import { buildCell, ringPos, RING_R } from './cell.js';
 import { buildStations } from './stations.js';
 import { buildStocker } from './stocker.js';
 import { createEffects } from './effects.js';
@@ -14,6 +14,7 @@ import { createDirector } from './director.js';
 import { buildScreens, SCREENS } from './screens.js';
 import { buildChannels } from './channels.js';
 import { buildLiving } from './living.js';
+import { buildDock } from './dock.js';
 import { solidsFromScene } from './camspace.js';
 import { disposeTree, damp, clamp } from './util.js';
 import { priceFor, isPeak, affordableTokens } from '../../model/pricing.js';
@@ -25,6 +26,8 @@ export const CAMERA_PRESETS = {
   fuel: { pos: [-5.6, 2.7, 4.4], target: [-7.6, 1.4, -0.4] },
   engine: { pos: [-1.8, 2.9, 4.8], target: [-3.9, 1.2, -0.5] },
   stations: { pos: [2.6, 6.2, 6.6], target: [2.6, 0.9, -1.2] },
+  // The subagent dock from the right, over the data pool, with the glass facade behind it.
+  dock: { pos: [-1.0, 3.3, -6.6], target: [-5.3, 1.8, -5.0] },
   products: { pos: [6.1, 2.9, 5.6], target: [8.3, 1.1, 0.4] },
   // Standing at the balcony rail, looking out over the city toward the setting sun.
   balcony: { pos: [0.5, 1.7, 23.4], target: [-7.0, -0.4, 41.8], mode: 'look' },
@@ -112,9 +115,12 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
   const screens = buildScreens(M, null, { demo });
   const channels = buildChannels();
   const living = buildLiving(M);
+  // Drones collect their task capsule above the cobot station (subagent and workflow calls).
+  const cobot = stations.byKind.robot;
+  const dock = buildDock(M, { pickup: cobot ? ringPos(cobot.theta, RING_R + 0.55, 2.45) : null });
   const dynamic = new THREE.Group();
   dynamic.name = 'wafers';
-  scene.add(stage.root, channels.root, screens.root, fuel.root, engine.root, cell.root, stations.root, stocker.root, living.root, fx.root, dynamic);
+  scene.add(stage.root, channels.root, screens.root, fuel.root, engine.root, cell.root, stations.root, stocker.root, living.root, dock.root, dock.fleet, fx.root, dynamic);
   const director = createDirector({ cell, stations, stocker, engine, wafers, root: dynamic });
   // Wafers and FOUPs are created later and stay in the reflection.
   const reflectTrimmed = reflTier ? trimReflection(scene, REFLECT_MIN_RADIUS) : 0;
@@ -123,7 +129,7 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
   const solids = solidsFromScene(scene);
 
   const staticHover = [];
-  for (const h of [...fuel.hover, ...engine.hover, ...cell.hover, ...stations.list.flatMap((s) => s.hover), ...stocker.hover, ...living.hover, ...screens.hover]) {
+  for (const h of [...fuel.hover, ...engine.hover, ...cell.hover, ...stations.list.flatMap((s) => s.hover), ...stocker.hover, ...dock.hover, ...living.hover, ...screens.hover]) {
     h.object.userData.hoverId = h.id;
     staticHover.push(h.object);
   }
@@ -135,6 +141,7 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
     ...stations.list.map((s) => ({ id: `station:${s.kind}`, anchor: s.anchor })),
     { id: 'loadport', anchor: stocker.anchors.loadPort.clone().setY(1.55) },
     { id: 'stocker', anchor: stocker.anchors.stocker.clone().setY(1.25) },
+    { id: 'dock', anchor: dock.labelAnchor },
     { id: 'living', anchor: living.labelAnchor },
   ];
 
@@ -234,6 +241,7 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
       errors = next.tools.errors;
       state = next;
       director.sync(next);
+      dock.sync(next.agents, next.workflows);
       readoutT = Math.max(readoutT, 0.45);
     },
     setLive(next) {
@@ -255,14 +263,17 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
       errorPulse = false;
       maxBalance = 0;
       director.reset();
+      dock.reset();
       screens.reset();
       readoutT = 1;
     },
     /** True while something animates that deserves the higher frame rate. */
     busy() {
-      return director.busy() || (live.phase && live.phase !== 'idle') || tps > 1;
+      return director.busy() || dock.busy() || (live.phase && live.phase !== 'idle') || tps > 1;
     },
-    update(dt, t) {
+    /** Subagent dock: { running, done, failed, stopped, overflow, wf, last } (tooltip). */
+    dockInfo: () => dock.counts(),
+    update(dt, t, camera) {
       tps = damp(tps, live.tps || 0, 6, dt);
       readoutT += dt;
       if (readoutT >= 0.5) {
@@ -291,6 +302,7 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
       errorPulse = false;
       director.update(dt, t);
       fx.update(dt);
+      dock.update(dt, t, camera);
       living.update(dt, t);
       updateChannels(dt, flow, phase);
       screenInfo.state = state;
@@ -322,6 +334,7 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
     dispose() {
       director.dispose();
       stocker.dispose();
+      dock.dispose();
       living.dispose();
       stage.dispose();
       disposeTree(scene);

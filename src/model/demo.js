@@ -1,12 +1,14 @@
 // Looping demo driver: emits DSH-shaped session events and live stream samples so the
-// factory runs without a real session. Used by the M0 style prototype.
+// factory runs without a real session (data source 演示, or no live projection available).
 import { priceFor, isPeak, normalizeUsage, usageCost } from './pricing.js';
 
 const lines = (n, tag) => Array.from({ length: n }, (_, i) => `${tag} ${i}`).join('\n');
 
 // A made-up project ("weather-board", a small forecast dashboard) so nothing in the
 // demo can be mistaken for the user's own files, commands or failures.
-// [name, args, seconds, fail?]
+// Tools: [name, args, seconds, fail?, extra?]. extra.agent starts a subagent that reports back
+// `after` seconds later (like DSH's settlement notice); extra.workflow runs a workflow whose
+// agents are [label, phase, seconds, outcome?] and which ends when the tool call returns.
 const SCRIPT = [
   {
     end: 'completed',
@@ -33,7 +35,7 @@ const SCRIPT = [
         ['web_fetch', { url: 'https://open-meteo.com/en/docs' }, 1.6],
       ] },
       { r: 260, o: 200, tools: [
-        ['subagent', { description: 'Review chart accessibility' }, 6.0],
+        ['subagent', { description: 'Review chart accessibility' }, 0.6, false, { agent: { name: 'a11y-reviewer', label: 'Review chart accessibility', after: 16 } }],
         ['todo_write', { todos: [{ content: 'Add a units toggle' }] }, 0.3],
       ] },
       { r: 200, o: 160, tools: [
@@ -53,6 +55,15 @@ const SCRIPT = [
     end: 'interrupted',
     steps: [
       { r: 120, o: 80, tools: [['compress', { content: 'earlier steps …' }, 1.6]], compact: 0.42 },
+      { r: 140, o: 120, tools: [
+        ['workflow', { meta: { name: 'verify-forecast' } }, 11.0, false, { workflow: { name: 'verify-forecast', agents: [
+          ['Check API error paths', 'Verify', 6.5],
+          ['Check chart contrast', 'Verify', 8.0],
+          ['Check unit conversions', 'Verify', 9.5, 'failed'],
+          ['Summarize findings', 'Report', 10.6],
+        ] } }],
+        ['subagent', { description: 'Draft release notes' }, 0.6, false, { agent: { name: 'notes-writer', label: 'Draft release notes', after: 13 } }],
+      ] },
       { r: 200, o: 140, tools: [
         ['mcp__tracker__create_issue', { title: 'Chart flickers on resize' }, 2.2],
         ['read', { file_path: 'src/components/HourlyChart.tsx' }, 0.5],
@@ -65,6 +76,55 @@ const SCRIPT = [
 ];
 
 const MODEL = { provider: 'deepseek', model: 'deepseek-flash', contextWindow: 1_000_000 };
+
+/** Queue an item `delay` simulated seconds from now (kept sorted by due time). */
+function later(g, delay, item) {
+  const at = g.clock + Math.max(0, delay);
+  let i = g.later.length;
+  while (i > 0 && g.later[i - 1].at > at) i--;
+  g.later.splice(i, 0, { at, item });
+}
+
+/** Wait `secs` simulated seconds, emitting queued items when they fall due. */
+function* pause(g, secs) {
+  let left = secs;
+  for (;;) {
+    while (g.later.length && g.later[0].at <= g.clock + 1e-9) yield g.later.shift().item;
+    if (left <= 1e-9) return;
+    const step = g.later.length ? Math.min(left, g.later[0].at - g.clock) : left;
+    yield { wait: step };
+    g.clock += step;
+    left -= step;
+  }
+}
+
+/** Background work a tool call starts: a subagent or a workflow run with its agents. */
+function* startExtra(g, p) {
+  const x = p.extra;
+  if (!x) return;
+  if (x.agent) {
+    const childId = `demo-agent-${g.agents++}`;
+    yield { event: 'subagent/catalog', data: { version: 3, childId, mode: 'one-shot', label: x.agent.label, name: x.agent.name } };
+    const summary = `${x.agent.label}: done`;
+    later(g, x.agent.after, {
+      event: 'user/message',
+      data: {
+        role: 'user',
+        content: [{ type: 'text', text: summary }],
+        source: { kind: 'subagent-settled', form: 'notice', summary, stopReason: x.agent.stop || 'completed', senderSessionId: childId },
+      },
+    });
+  }
+  if (x.workflow) {
+    const runId = `demo-run-${g.runs++}`;
+    p.runId = runId;
+    yield { event: 'tool-workflow/run-start', data: { runId, name: x.workflow.name } };
+    x.workflow.agents.forEach(([label, phase, secs, outcome], seq) => {
+      later(g, 0.3 * (seq + 1), { event: 'tool-workflow/agent-start', data: { runId, seq, label, phase, childId: `${runId}-agent-${seq}` } });
+      later(g, secs, { event: 'tool-workflow/agent-end', data: { runId, seq, outcome: outcome || 'completed' } });
+    });
+  }
+}
 
 function* playTurn(turn, g) {
   const ti = g.turn++;
@@ -85,7 +145,7 @@ function* playTurn(turn, g) {
         const tps = rate * (0.82 + 0.36 * Math.abs(Math.sin(k * 1.7 + si)));
         g.streamed += tokens / ticks;
         yield { live: { phase, tps } };
-        yield { wait: secs / ticks };
+        yield* pause(g, secs / ticks);
       }
     }
     const miss = carry + Math.round(300 + 400 * Math.abs(Math.sin(ti + si)));
@@ -103,18 +163,20 @@ function* playTurn(turn, g) {
     carry = 0;
     if (tools.length) {
       yield { live: { phase: 'tool', tps: 0 } };
-      const pending = tools.map(([name, args, secs, fail]) => ({ id: `demo-${ti}-${si}-${g.call++}`, name, args, secs, fail }));
+      const pending = tools.map(([name, args, secs, fail, extra]) => ({ id: `demo-${ti}-${si}-${g.call++}`, name, args, secs, fail, extra }));
       for (const p of pending) {
         yield { event: 'tool/call', data: { turn: ti, step: si, callId: p.id, name: p.name, arguments: p.args } };
-        yield { wait: 0.08 };
+        yield* startExtra(g, p);
+        yield* pause(g, 0.08);
       }
       const order = pending.slice().sort((a, b) => a.secs - b.secs);
       let elapsed = 0.08 * pending.length;
       for (const p of order) {
         const w = Math.max(0, p.secs - elapsed);
-        if (w > 0) yield { wait: w };
+        if (w > 0) yield* pause(g, w);
         elapsed = Math.max(elapsed, p.secs);
         carry += p.fail ? 260 : 900 + Math.round(2400 * Math.abs(Math.cos(g.call + si)));
+        if (p.runId) yield { event: 'tool-workflow/run-end', data: { runId: p.runId, stopReason: 'completed' } };
         yield {
           event: 'tool/result',
           data: {
@@ -127,7 +189,7 @@ function* playTurn(turn, g) {
       if (st.compact) g.ctx = Math.round(g.ctx * st.compact);
     }
     yield { event: 'step/end', data: { turn: ti, step: si } };
-    yield { wait: 0.35 };
+    yield* pause(g, 0.35);
   }
   yield { event: 'turn/end', data: { turn: ti, reason: { kind: turn.end } } };
   yield { live: { phase: 'idle', tps: 0 } };
@@ -137,7 +199,7 @@ function* scriptLoop(g) {
   for (;;) {
     for (const turn of SCRIPT) {
       yield* playTurn(turn, g);
-      yield { wait: 2.8 };
+      yield* pause(g, 2.8);
       if (g.ctx > 900_000) g.ctx = 420_000;
     }
   }
@@ -148,7 +210,7 @@ function* scriptLoop(g) {
  * prefill() synchronously returns the events of the first two turns, time-stamped in the past.
  */
 export function createDemo({ onEvents, onLive, speed = 1 } = {}) {
-  const g = { turn: 0, call: 0, ctx: 380_000, streamed: 0, balance: 52.8, seq: 0 };
+  const g = { turn: 0, call: 0, ctx: 380_000, streamed: 0, balance: 52.8, seq: 0, clock: 0, later: [], agents: 0, runs: 0 };
   const price = priceFor(MODEL.provider, MODEL.model);
   const it = scriptLoop(g);
   let timer = null;

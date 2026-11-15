@@ -1394,6 +1394,8 @@ export function createFactoryScene(container, opts = {}) {
       labelLayer.style.display = labelsOn ? '' : 'none';
     },
     stats: () => (world ? world.stats() : null),
+    /** Subagent dock counters for the tooltip: { running, done, failed, stopped, overflow, wf, last }. */
+    dockInfo: () => (world ? world.dockInfo() : null),
     dispose: destroy,
   };
 }

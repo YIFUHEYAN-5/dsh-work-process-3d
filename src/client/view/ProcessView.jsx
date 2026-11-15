@@ -24,7 +24,7 @@ const STREAM_TICK_MS = 250;
 const QUALITY_KEY = 'dwp3d.quality';
 const HINT_KEY = 'dwp3d.hint';
 const LOOK_HINT_KEY = 'dwp3d.hint.look';
-const VIEWS = ['overview', 'fuel', 'engine', 'stations', 'products', 'living', 'balcony'];
+const VIEWS = ['overview', 'fuel', 'engine', 'stations', 'dock', 'products', 'living', 'balcony'];
 const LEGEND = ['raw', 'normal', 'gold', 'bad'];
 const PHASE_COLOR = { idle: '#8a93a6', thinking: '#a487ff', reasoning: '#a487ff', generating: '#6f8cff', tool: '#ffb347' };
 const CALL_STATUS = {
@@ -181,6 +181,7 @@ function presetFor(id) {
   if (id === 'engine' || id === 'console' || id === 'dispenser') return 'engine';
   if (id === 'robot' || id === 'lock' || id === 'unload' || id.startsWith('station:')) return 'stations';
   if (id === 'living') return 'living';
+  if (id === 'dock') return 'dock';
   return 'products';
 }
 
@@ -219,6 +220,7 @@ function labelSpec(lang) {
     machine('tank'),
     machine('engine'),
     machine('robot'),
+    machine('dock'),
     ...STATION_ORDER.map((k) => ({ id: `station:${k}`, text: nameOf(STATION_INFO[k], lang), sub: STATION_INFO[k].code })),
     machine('loadport'),
     machine('stocker'),
@@ -293,6 +295,24 @@ function tipFor(id, d) {
     case 'unload':
     case 'living':
       return machine(id);
+    case 'dock': {
+      const agents = s.agents || [];
+      if (!agents.length) return machine('dock', [['', t('dock.none')]]);
+      const count = (status) => agents.filter((a) => a.status === status).length;
+      const running = agents.filter((a) => a.status === 'running');
+      const rows = [
+        [t('dock.running'), String(running.length)],
+        [t('dock.done'), String(count('done'))],
+      ];
+      if (count('error')) rows.push([t('dock.failed'), String(count('error'))]);
+      if (count('stopped')) rows.push([t('dock.stopped'), String(count('stopped'))]);
+      if (d.dock && d.dock.overflow) rows.push([t('dock.queued'), String(d.dock.overflow)]);
+      const flows = s.workflows || [];
+      const wf = flows.filter((w) => w.status === 'running').pop() || flows[flows.length - 1];
+      if (wf) rows.push([t('dock.workflow'), `${wf.name || '—'}${wf.phase ? ` · ${wf.phase}` : ''} · ${wf.done + wf.failed}/${wf.agents}`]);
+      for (const a of running.slice(-3)) rows.push(['', a.label || a.name || a.id]);
+      return machine('dock', rows);
+    }
     case 'stocker': {
       const done = s.turns.filter((x) => x.status !== 'running');
       const ok = done.filter((x) => x.status === 'ok').length;
@@ -1098,7 +1118,8 @@ export function ProcessView(props) {
     },
   ];
   const recent = s.calls.slice(-5).reverse();
-  const tipData = { t, s, live, lang, price, peak, m, phase, balance, currency, demo: demoOn };
+  const dockInfo = hover && hover.id === 'dock' && sceneRef.current ? sceneRef.current.dockInfo() : null;
+  const tipData = { t, s, live, lang, price, peak, m, phase, balance, currency, demo: demoOn, dock: dockInfo };
   // Live status line under the title.
   const liveMissing = !demoOn && !liveSeen && liveWaited;
   const liveIdle = !demoOn && liveSeen && s.turnCount === 0 && !s.calls.length;
