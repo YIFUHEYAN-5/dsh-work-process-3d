@@ -1,9 +1,35 @@
-// Pooled sprite effects: smoke puffs for failed tool calls and sparks for the laser engraver.
+// Pooled effects: smoke puffs for failed tool calls, sparks for the laser engraver and floor
+// ripples that spread from a station's base when a call finishes.
 import * as THREE from 'three';
+import { NO_REFLECT_LAYER } from './reflection.js';
+
+export const RIPPLE_LIFE = 1.1;
+const RIPPLE_COUNT = 12;
 
 export function createEffects(tex) {
   const root = new THREE.Group();
   root.name = 'effects';
+  // Thin bright ring with a soft inner fade; one shared geometry, one material per pooled ring.
+  const ringGeo = new THREE.RingGeometry(0.9, 1.0, 64, 1).rotateX(-Math.PI / 2);
+  const ripples = Array.from({ length: RIPPLE_COUNT }, () => {
+    const mat = new THREE.MeshBasicMaterial({
+      name: 'ripple',
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    });
+    const mesh = new THREE.Mesh(ringGeo, mat);
+    mesh.name = 'ripple';
+    mesh.visible = false;
+    mesh.renderOrder = 2;
+    // Flat on the mirror floor already: drawing it into the reflection would only double it.
+    mesh.layers.set(NO_REFLECT_LAYER);
+    root.add(mesh);
+    return { mesh, mat, life: 0, from: 0.3, to: 1.2, gain: 1 };
+  });
+  let ri = 0;
   const make = (count, color, additive) =>
     Array.from({ length: count }, () => {
       const mat = new THREE.SpriteMaterial({
@@ -68,7 +94,42 @@ export function createEffects(tex) {
         });
       }
     },
+    /**
+     * A ring spreading over the floor from pos (a finished call). color = hex; radius from → to.
+     */
+    ripple(pos, color, { from = 0.35, to = 1.25, gain = 1 } = {}) {
+      const r = ripples[ri++ % ripples.length];
+      r.life = RIPPLE_LIFE;
+      r.from = from;
+      r.to = to;
+      r.gain = gain;
+      r.mat.color.setHex(color).multiplyScalar(1.6);
+      r.mesh.position.set(pos.x, pos.y + 0.004, pos.z);
+      r.mesh.scale.setScalar(from);
+      r.mat.opacity = gain;
+      r.mesh.visible = true;
+    },
+    /** Active ripples, for tests: [{ position, radius, opacity }]. */
+    ripples() {
+      return ripples.filter((r) => r.life > 0).map((r) => ({ position: r.mesh.position.clone(), radius: r.mesh.scale.x, opacity: r.mat.opacity }));
+    },
+    busy() {
+      return ripples.some((r) => r.life > 0);
+    },
     update(dt) {
+      for (const r of ripples) {
+        if (r.life <= 0) continue;
+        r.life -= dt;
+        if (r.life <= 0) {
+          r.mesh.visible = false;
+          r.mat.opacity = 0;
+          continue;
+        }
+        const age = 1 - r.life / RIPPLE_LIFE;
+        const ease = 1 - (1 - age) * (1 - age) * (1 - age);
+        r.mesh.scale.setScalar(r.from + (r.to - r.from) * ease);
+        r.mat.opacity = r.gain * (1 - age) * (1 - age);
+      }
       for (const pool of [smoke, sparks]) {
         for (const p of pool) {
           if (p.life <= 0) continue;

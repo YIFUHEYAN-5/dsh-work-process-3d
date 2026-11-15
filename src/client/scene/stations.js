@@ -737,6 +737,8 @@ function buildStation(M, kind, index, fx) {
   const GREEN = new THREE.Color(0x34d17a);
   const RED = new THREE.Color(0xff3b30);
   const smokeAt = ringPos(theta, PORT_R + 0.05, WAFER_Y + 0.08);
+  const rippleAt = ringPos(theta, RING_R, 0);
+  const rippleColor = parseInt(accent.slice(1), 16);
 
   /** Repaints the holo only when something it shows has changed. */
   function drawReadout() {
@@ -783,6 +785,8 @@ function buildStation(M, kind, index, fx) {
       st.flash = ok ? 0.9 : 2.2;
       st.flashOk = ok;
       if (!ok) fx.puff(smokeAt, 10);
+      // A ring of the station's light spreads over the floor (red when the call failed).
+      fx.ripple?.(rippleAt, ok ? rippleColor : 0xff5a4f, { from: 0.55, to: 1.45, gain: ok ? 0.9 : 1.2 });
       machine.onEnd?.(call, ok);
     },
     update(dt, t, s) {

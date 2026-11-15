@@ -27,6 +27,17 @@ const LOOK_HINT_KEY = 'dwp3d.hint.look';
 const VIEWS = ['overview', 'fuel', 'engine', 'stations', 'dock', 'products', 'living', 'balcony'];
 const LEGEND = ['raw', 'normal', 'gold', 'bad'];
 const PHASE_COLOR = { idle: '#8a93a6', thinking: '#a487ff', reasoning: '#a487ff', generating: '#6f8cff', tool: '#ffb347' };
+// Accent per HUD card; the same hues as the machines they describe (fuel cyan, engine violet…).
+const CARD_ACCENT = {
+  balance: '#4fd6ff',
+  context: '#5b8cff',
+  input: '#8fa3c8',
+  output: '#9b6bff',
+  cost: '#ffc65c',
+  tools: '#ffa21f',
+  products: '#e9c77f',
+  efficiency: '#34d17a',
+};
 const CALL_STATUS = {
   running: { icon: '●', color: '#6f8cff' },
   ok: { icon: '✓', color: '#34d17a' },
@@ -392,10 +403,21 @@ function Tooltip({ hover, data, rootRef }) {
 
 function Card({ card }) {
   const title = card.title || `${card.k} · ${card.v}${card.s ? ` · ${card.s}` : ''}`;
+  // The value glows briefly in the card's accent when it changes (not on first show).
+  const prev = useRef(card.v);
+  const [bump, setBump] = useState(0);
+  useEffect(() => {
+    if (prev.current === card.v) return;
+    prev.current = card.v;
+    setBump((n) => n + 1);
+  }, [card.v]);
+  const accent = CARD_ACCENT[card.id];
   return (
-    <div className="dwp3d-panel dwp3d-card" title={title}>
+    <div className="dwp3d-panel dwp3d-card" title={title} style={accent ? { '--dwp3d-c': accent } : undefined}>
       <div className="k">{card.k}</div>
-      <div className="v">{card.v}</div>
+      <div className="v" key={bump} data-bump={bump ? '' : undefined}>
+        {card.v}
+      </div>
       {card.s ? <div className="s">{card.s}</div> : null}
       {card.bar != null ? (
         <div className="dwp3d-bar">
@@ -418,7 +440,9 @@ function Ticker({ t, calls }) {
           const text = c.label ? `${c.name} · ${c.label}` : c.name;
           return (
             <div className="dwp3d-tick" key={c.id} title={`${info.code} · ${text}`}>
-              <span className="st" style={{ color: st.color }} aria-hidden="true">{st.icon}</span>
+              <span className={status === 'running' ? 'st run' : 'st'} style={{ color: st.color }} aria-hidden="true">
+                {st.icon}
+              </span>
               <span className="dwp3d-sr">{t('call.' + status)}</span>
               <code>{info.code}</code>
               <span className="l">{text}</span>

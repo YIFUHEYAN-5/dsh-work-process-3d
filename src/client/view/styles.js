@@ -16,7 +16,7 @@ export const CSS = `
 .dwp3d-label-title{font-size:11.5px;font-weight:600;color:#eef2fa}
 .dwp3d-label-sub{font-size:10px;letter-spacing:.06em;color:#93a4c6;font-family:ui-monospace,"Cascadia Mono",Consolas,monospace}
 @keyframes dwp3d-label-pulse{50%{opacity:.4}}
-.dwp3d-panel{background:rgba(12,14,19,.68);border:1px solid rgba(255,255,255,.08);border-radius:10px;backdrop-filter:blur(10px) saturate(1.15);-webkit-backdrop-filter:blur(10px) saturate(1.15);box-shadow:0 6px 24px rgba(0,0,0,.32)}
+.dwp3d-panel{background:linear-gradient(180deg,rgba(22,27,38,.76),rgba(11,13,19,.68));border:1px solid rgba(160,185,255,.11);border-radius:10px;backdrop-filter:blur(10px) saturate(1.15);-webkit-backdrop-filter:blur(10px) saturate(1.15);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 8px 26px rgba(0,0,0,.3)}
 .dwp3d-top{position:absolute;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;pointer-events:none;flex-wrap:wrap;z-index:2}
 .dwp3d-top>*{pointer-events:auto}
 .dwp3d-title{display:flex;flex-direction:column;gap:3px;padding:6px 10px;max-width:min(520px,100%)}
@@ -53,6 +53,7 @@ export const CSS = `
 .dwp3d-tick code{flex:none;font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;font-size:11px;color:#9aaacb}
 .dwp3d-tick .l{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 .dwp3d-tick .st{flex:none;width:12px;text-align:center;font-size:11px}
+.dwp3d-tick .st.run{animation:dwp3d-label-pulse 1.1s ease-in-out infinite}
 .dwp3d-muted{color:#8f9ab0}
 .dwp3d-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 .dwp3d-legend{margin-left:auto;padding:6px 10px;display:flex;flex-direction:column;gap:4px;max-width:100%;font-size:11.5px;color:#c9d2e3}
@@ -79,12 +80,16 @@ export const CSS = `
 .dwp3d-check{gap:8px;cursor:pointer;color:#c9d2e3}
 .dwp3d-check input{margin:0;accent-color:#4d6bfe;cursor:pointer}
 .dwp3d-cards{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;pointer-events:auto}
-.dwp3d-card{padding:7px 10px 8px;min-width:0}
+.dwp3d-card{position:relative;padding:7px 10px 8px;min-width:0}
+.dwp3d-card:before{content:"";position:absolute;left:10px;right:10px;top:-1px;height:1px;background:linear-gradient(90deg,var(--dwp3d-c,#4d6bfe),transparent 85%);opacity:.75}
 .dwp3d-card .k{font-size:11px;color:#9aaacb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dwp3d-card .k:before{content:"";display:inline-block;width:6px;height:6px;border-radius:2px;margin-right:6px;vertical-align:1px;background:var(--dwp3d-c,#4d6bfe)}
 .dwp3d-card .v{font-size:16px;font-weight:650;color:#f1f4fa;font-variant-numeric:tabular-nums;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dwp3d-card .v[data-bump]{animation:dwp3d-bump .9s ease-out}
+@keyframes dwp3d-bump{from{color:var(--dwp3d-c,#8fb0ff);text-shadow:0 0 10px var(--dwp3d-c,#8fb0ff)}to{color:#f1f4fa;text-shadow:0 0 0 transparent}}
 .dwp3d-card .s{font-size:11px;color:#a3afc5;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dwp3d-bar{height:3px;border-radius:2px;background:rgba(255,255,255,.09);margin-top:5px;overflow:hidden}
-.dwp3d-bar>i{display:block;height:100%;border-radius:2px;background:#4d6bfe;transition:width .4s}
+.dwp3d-bar>i{display:block;height:100%;border-radius:2px;background:var(--dwp3d-c,#4d6bfe);transition:width .4s}
 .dwp3d-tip{position:absolute;z-index:4;width:max-content;max-width:300px;padding:9px 11px;pointer-events:none;font-size:12px;line-height:1.45}
 .dwp3d-tip h4{margin:0 0 3px;font-size:12.5px;font-weight:650;color:#f3f5fa}
 .dwp3d-tip p{margin:2px 0 0;color:#b8c3d8}
@@ -114,7 +119,7 @@ export const CSS = `
 @media (prefers-reduced-motion: reduce){
   .dwp3d-spin{animation:none}
   .dwp3d-label,.dwp3d-bar>i{transition:none}
-  .dwp3d-label[data-state=working]:before{animation:none}
+  .dwp3d-label[data-state=working]:before,.dwp3d-tick .st.run,.dwp3d-card .v[data-bump]{animation:none}
 }
 @container dwp3d (max-width: 900px){
   .dwp3d-cards{grid-template-columns:repeat(4,minmax(0,1fr))}

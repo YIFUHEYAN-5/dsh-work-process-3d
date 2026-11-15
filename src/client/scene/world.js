@@ -282,7 +282,7 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
     },
     /** True while something animates that deserves the higher frame rate. */
     busy() {
-      return director.busy() || dock.busy() || (live.phase && live.phase !== 'idle') || tps > 1;
+      return director.busy() || dock.busy() || fx.busy() || (live.phase && live.phase !== 'idle') || tps > 1;
     },
     /** Subagent dock: { running, done, failed, stopped, overflow, wf, last } (tooltip). */
     dockInfo: () => dock.counts(),
