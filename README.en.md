@@ -8,7 +8,7 @@ A DeepSeek Harness (DSH) plugin. It adds a "3D process" tab to every conversatio
 
 ## What the scene shows
 
-The factory stands in a white atrium on the top floor of a skyscraper: floor-to-ceiling glass all around, a balcony on the sunset side, and a future city outside at dusk or in daylight. A curved media wall at the back shows the live token flow, a work summary and the cost. The machines sit on floating platforms linked by glowing data channels.
+The factory stands in a white atrium on the top floor of a skyscraper about 420 m tall: floor-to-ceiling glass all around, a balcony on the sunset side, and an open future city below at dusk or in daylight, where a distant compute tower feeds the fuel tank through a light beam. A curved media wall at the back shows the live token flow, a work summary and the cost. The machines sit on floating platforms linked by glowing data channels, and the floors are polished close to a mirror.
 
 | Machine | Data |
 | --- | --- |
@@ -16,7 +16,7 @@ The factory stands in a white atrium on the top floor of a skyscraper: floor-to-
 | Main engine | Rotor speed follows the generation rate; the core color shows the phase (blue generating, violet reasoning, orange tools) |
 | Console | Context gauge (the relief valve vents steam near the limit), tachometer, mechanical counters for cache-miss input, cache hits, output, reasoning and cost |
 | Wafer dispenser → load lock | Each tool call releases one wafer, which enters the station ring through the load lock |
-| Central robot | Moves wafers between the load lock, the stations and the unload lock; it speeds up when work queues |
+| Central robot | Moves wafers between the load lock, the stations and the unload lock; it speeds up when work queues. Side light strips and a small panel on its base show the current move, its route and the wafer it carries |
 | 10 stations | Archive scanner (read/grep/glob), laser engraver (write/edit), terminal console (pwsh/bash), satellite uplink (web search/fetch), cobot cell (subagents/workflows), hydraulic press (context compression), kanban board (todos/goals), call beacon (questions to the user), labeler (delivered files), generic module (other and MCP tools) |
 | Unload lock → load port → gantry → stocker | Finished wafers go into the current batch's FOUP; when the turn ends the gantry carries it to the stocker, labeled Pass or Rework |
 

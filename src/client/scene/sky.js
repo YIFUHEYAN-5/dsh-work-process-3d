@@ -73,9 +73,12 @@ export function paintSky(g, W, H, look) {
 
   // Base gradient by elevation.
   const grad = g.createLinearGradient(0, 0, 0, H);
+  // Below the horizon the band down to about −4.5° is what lies beyond the modelled city floor
+  // (which ends about 4° below the horizon seen from the atrium), so it is painted in the
+  // city's haze colour.
   const stops = [
     [90, s.zenith], [48, s.high], [22, s.mid], [9, s.low], [2.5, s.horizon], [0, s.horizon],
-    [-1.2, s.groundHaze], [-9, s.ground], [-90, s.below],
+    [-0.6, s.groundHaze], [-4.5, s.groundHaze], [-9, s.ground], [-90, s.below],
   ];
   for (const [e, c] of stops) grad.addColorStop(Math.min(1, Math.max(0, yOf(e) / H)), c);
   g.globalCompositeOperation = 'source-over';
@@ -92,7 +95,7 @@ export function paintSky(g, W, H, look) {
     glow(g, x, sy, 14 * ppd, 14 * ppd, '#fff4e4', 0.5);
   });
   // Belt of Venus on the side away from the sun.
-  wrap(sx + W / 2, (x) => glow(g, x, yOf(8), 130 * ppd, 7 * ppd, s.belt, 0.32));
+  wrap(sx + W / 2, (x) => glow(g, x, yOf(8), 130 * ppd, 7 * ppd, s.belt, 0.2));
 
   // Thin cloud streaks, lit on the sun side.
   if (s.clouds > 0) {
@@ -127,72 +130,59 @@ export function paintSky(g, W, H, look) {
     }
   }
 
-  // Far skyline on the horizon, beyond the modelled city.
+  // Far skyline beyond the modelled city: low, hazy silhouettes on the horizon.
   const far = s.far;
-  const skyline = mixHex(far.body, far.haze, 0.35);
+  const skyline = mixHex(far.body, far.haze, 0.55);
   let x = 0;
   while (x < W) {
-    const w = 3 + Math.floor(r() * 18);
-    const tall = r() < 0.08 ? 2.2 + r() * 2.6 : 0.4 + Math.pow(r(), 1.8) * 2.1;
+    const w = 2 + Math.floor(r() * 12);
+    const tall = r() < 0.07 ? 1.5 + r() * 1.1 : 0.15 + Math.pow(r(), 1.8) * 1.2;
     const top = yOf(tall);
-    const base = yOf(-0.8);
+    const base = yOf(-2.5);
     g.fillStyle = skyline;
     g.fillRect(x, top, w, base - top);
-    if (tall > 3.4 && r() < 0.6) g.fillRect(x + w / 2 - 0.5, top - 4 - r() * 8, 1, 6 + r() * 8);
+    if (tall > 2.1 && r() < 0.6) g.fillRect(x + w / 2 - 0.5, top - 3 - r() * 5, 1, 4 + r() * 5);
     if (far.windows > 0) {
-      const lights = Math.floor((base - top) * w * 0.06 * far.windows);
+      const lights = Math.floor((base - top) * w * 0.05 * far.windows);
       for (let k = 0; k < lights; k++) {
         const pick = r();
-        const c = pick < 0.62 ? '#ffc078' : pick < 0.82 ? '#cfe3ff' : pick < 0.92 ? '#5fe1ff' : '#ff5bd2';
-        g.fillStyle = rgba(c, (0.45 + 0.5 * r()) * Math.min(1, far.windows * 1.4));
+        const c = pick < 0.62 ? '#ffc078' : pick < 0.85 ? '#cfe3ff' : '#5fe1ff';
+        g.fillStyle = rgba(c, (0.25 + 0.4 * r()) * Math.min(1, far.windows * 1.4));
         g.fillRect(x + Math.floor(r() * w), top + Math.floor(r() * (base - top)), 1, 1);
       }
     }
-    if (far.neon > 0 && r() < 0.05) {
-      const c = r() < 0.5 ? '#ff4fd8' : '#46e6ff';
-      g.fillStyle = rgba(c, 0.55 * far.neon);
-      g.fillRect(x, top - 1, w, 1.5);
+    if (far.neon > 0 && r() < 0.04) {
+      g.fillStyle = rgba(r() < 0.7 ? '#46e6ff' : '#ffb347', 0.45 * far.neon);
+      g.fillRect(x, top - 1, w, 1);
     }
-    x += w + (r() < 0.25 ? Math.floor(r() * 6) : 0);
+    x += w + (r() < 0.3 ? Math.floor(r() * 8) : 0);
   }
-  // Haze over the skyline foot.
-  const haze = g.createLinearGradient(0, yOf(2.5), 0, yOf(-1.5));
+  // Haze over the skyline: denser toward its foot.
+  const haze = g.createLinearGradient(0, yOf(1.8), 0, yOf(-3.2));
   haze.addColorStop(0, rgba(far.haze, 0));
-  haze.addColorStop(0.6, rgba(far.haze, 0.42));
-  haze.addColorStop(1, rgba(far.haze, 0.18));
+  haze.addColorStop(0.45, rgba(far.haze, 0.38));
+  haze.addColorStop(1, rgba(far.haze, 0.62));
   g.fillStyle = haze;
-  g.fillRect(0, yOf(2.5), W, yOf(-1.5) - yOf(2.5));
+  g.fillRect(0, yOf(1.8), W, yOf(-3.2) - yOf(1.8));
 
-  // City ground far below: street lights, denser toward the horizon.
+  // City lights beyond the modelled floor, faint in the haze, thinning toward the horizon.
   if (s.lights > 0) {
-    const count = Math.round(14000 * s.lights);
+    const count = Math.round(9000 * s.lights);
     for (let i = 0; i < count; i++) {
-      const t = Math.pow(r(), 2.4);
-      const e = -0.9 - 28 * t;
-      const size = 0.8 + t * 1.6;
+      const t = Math.pow(r(), 1.3);
+      const e = -0.3 - 3.9 * t;
       const pick = r();
-      const c = pick < 0.55 ? '#ffb46a' : pick < 0.78 ? '#ffe2b0' : pick < 0.9 ? '#ffffff' : pick < 0.96 ? '#55dcff' : '#ff4fd0';
-      g.fillStyle = rgba(c, (0.3 + 0.6 * r()) * Math.min(1, s.lights * 1.2) * (1 - 0.5 * t));
-      g.fillRect(r() * W, yOf(e), size, size * 0.7);
-    }
-    // A few long avenues of light converging on the horizon.
-    g.lineWidth = 1;
-    for (let i = 0; i < 26; i++) {
-      const y0 = yOf(-1 - r() * 2);
-      const y1 = yOf(-6 - r() * 20);
-      const x0 = r() * W;
-      g.strokeStyle = rgba(r() < 0.75 ? '#ffb36b' : '#5fdcff', 0.22 * s.lights);
-      g.beginPath();
-      g.moveTo(x0, y0);
-      g.lineTo(x0 + (r() - 0.5) * 220, y1);
-      g.stroke();
+      const c = pick < 0.6 ? '#ffb46a' : pick < 0.82 ? '#ffe2b0' : pick < 0.93 ? '#ffffff' : '#55dcff';
+      g.fillStyle = rgba(c, (0.12 + 0.25 * r()) * Math.min(1, s.lights * 1.2) * (0.4 + 0.6 * t));
+      g.fillRect(r() * W, yOf(e), 1, 1);
     }
   }
-  const groundHaze = g.createLinearGradient(0, yOf(0), 0, yOf(-12));
-  groundHaze.addColorStop(0, rgba(s.groundHaze, 0.55));
-  groundHaze.addColorStop(1, rgba(s.groundHaze, 0));
+  // Blend into the haze colour where the modelled city floor takes over.
+  const groundHaze = g.createLinearGradient(0, yOf(0.6), 0, yOf(-4.4));
+  groundHaze.addColorStop(0, rgba(s.groundHaze, 0.1));
+  groundHaze.addColorStop(1, rgba(s.groundHaze, 0.9));
   g.fillStyle = groundHaze;
-  g.fillRect(0, yOf(0), W, yOf(-12) - yOf(0));
+  g.fillRect(0, yOf(0.6), W, yOf(-4.4) - yOf(0.6));
 }
 
 const DOME_VERT = /* glsl */ `

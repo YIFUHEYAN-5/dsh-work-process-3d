@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Polyline, clamp, lerp, easeInOut, angleDelta } from './util.js';
 import { PORT_R, RETRACT_R, LIFT, WAFER_Y, LOCK_THETA, OUT_THETA } from './cell.js';
-import { PRODUCTIVE_KINDS } from '../../model/stations.js';
+import { PRODUCTIVE_KINDS, STATION_INFO, MACHINE_INFO } from '../../model/stations.js';
 
 /*
  * The director turns model snapshots into physical motion. Every tool call
@@ -263,6 +263,7 @@ export function createDirector({ cell, stations, stocker, engine, wafers, root }
     robo.cur = null;
     robo.carry = null;
     cell.robot.setBusy(false);
+    if (cell.robot.setStatus) cell.robot.setStatus('idle');
     xfer = null;
   }
 
@@ -341,6 +342,8 @@ export function createDirector({ cell, stations, stocker, engine, wafers, root }
     return {
       type: 'deliver',
       job: j,
+      from: MACHINE_INFO.lock.code,
+      to: STATION_INFO[j.kind].code,
       steps: [
         rotate(LOCK_THETA, SLIDE),
         { reach: PORT_R, d: 0.38 },
@@ -381,6 +384,8 @@ export function createDirector({ cell, stations, stocker, engine, wafers, root }
     return {
       type: 'collect',
       job: j,
+      from: STATION_INFO[j.kind].code,
+      to: MACHINE_INFO.unload.code,
       steps: [
         rotate(S.theta, lvl + SLIDE),
         { reach: PORT_R, d: 0.38 },
@@ -476,6 +481,14 @@ export function createDirector({ cell, stations, stocker, engine, wafers, root }
       robo.task = null;
       robo.idle = 0;
       R.setBusy(false);
+    }
+    if (R.setStatus) {
+      // Cached by the robot: only a change of action, route or carried wafer redraws its panel.
+      const t = robo.task;
+      const moving = !!robo.cur || robo.steps.length > 0;
+      const look = robo.carry && robo.carry.mesh ? robo.carry.mesh.userData.look : null;
+      if (t) R.setStatus(t.type, t.from, t.to, look);
+      else R.setStatus(moving ? 'home' : 'idle', null, moving ? MACHINE_INFO.lock.code : null, null);
     }
     if (robo.carry && robo.carry.mesh) {
       R.carryPoint(tmp);

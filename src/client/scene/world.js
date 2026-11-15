@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createMaterials } from './materials.js';
 import { buildStage } from './environment.js';
-import { createReflection } from './reflection.js';
+import { createReflection, NO_REFLECT_LAYER } from './reflection.js';
 import { BRIGHTNESS, DEFAULT_LOOK, lookOf } from './looks.js';
 import { buildFuel, TANK_POS } from './fuel.js';
 import { buildEngine } from './engine.js';
@@ -28,13 +28,34 @@ export const CAMERA_PRESETS = {
   balcony: { pos: [0.5, 1.7, 23.4], target: [-7.0, -0.4, 41.8], mode: 'look' },
 };
 
-/** Planar floor reflections: only on the two top tiers (one extra low-resolution scene pass). */
+/**
+ * Planar floor reflections (one extra reduced-resolution scene pass). `every` = 2 refreshes the
+ * reflection on every other frame; on the higher tiers that only happens while the camera is still.
+ */
 const REFLECTION = {
   low: null,
-  medium: null,
-  high: { scale: 0.4, strength: 0.5, blur: 1.0 },
-  ultra: { scale: 0.55, strength: 0.55, blur: 0.8 },
+  medium: { scale: 0.3, strength: 0.62, blur: 0.7, every: 2 },
+  high: { scale: 0.5, strength: 0.7, blur: 0.45, every: 1 },
+  ultra: { scale: 0.65, strength: 0.72, blur: 0.3, every: 1 },
 };
+/** Meshes smaller than this (world bounding radius, m) are left out of the reflection pass. */
+const REFLECT_MIN_RADIUS = 0.15;
+
+/** Move small static meshes to the main-camera-only layer so the reflection pass skips them. */
+function trimReflection(scene, minRadius) {
+  scene.updateMatrixWorld(true);
+  const sphere = new THREE.Sphere();
+  let moved = 0;
+  scene.traverse((o) => {
+    if (!o.isMesh || o.isInstancedMesh || !(o.layers.mask & 1) || !o.geometry.attributes.position) return;
+    if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+    sphere.copy(o.geometry.boundingSphere).applyMatrix4(o.matrixWorld);
+    if (sphere.radius >= minRadius) return;
+    o.layers.set(NO_REFLECT_LAYER);
+    moved += 1;
+  });
+  return moved;
+}
 
 const NICE = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
 
@@ -50,7 +71,8 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
   let lookDef = lookOf(look);
   let bright = clamp(brightness, BRIGHTNESS.min, BRIGHTNESS.max);
   const gl = environment ? renderer : null;
-  const reflCfg = gl ? REFLECTION[quality] : null;
+  const reflTier = REFLECTION[quality] || null;
+  const reflCfg = gl ? reflTier : null;
   const reflection = reflCfg ? createReflection(gl, reflCfg) : null;
 
   const { M, tex } = createMaterials(quality);
@@ -79,6 +101,9 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
   dynamic.name = 'wafers';
   scene.add(stage.root, channels.root, screens.root, fuel.root, engine.root, cell.root, stations.root, stocker.root, fx.root, dynamic);
   const director = createDirector({ cell, stations, stocker, engine, wafers, root: dynamic });
+  // Wafers and FOUPs are created later and stay in the reflection.
+  const reflectTrimmed = reflTier ? trimReflection(scene, REFLECT_MIN_RADIUS) : 0;
+  const reflCam = { frame: 0, matrix: new THREE.Matrix4(), proj: new THREE.Matrix4(), ready: false };
 
   const staticHover = [];
   for (const h of [...fuel.hover, ...engine.hover, ...cell.hover, ...stations.list.flatMap((s) => s.hover), ...stocker.hover]) {
@@ -229,8 +254,19 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
     },
     /** Extra passes that must run right before the main render (floor reflection). */
     prerender(camera) {
-      if (reflection) reflection.update(scene, camera);
+      if (!reflection) return;
+      reflCam.frame += 1;
+      const still = reflCam.ready && reflCam.matrix.equals(camera.matrixWorld) && reflCam.proj.equals(camera.projectionMatrix);
+      // While the camera is still (or on tiers that always halve it) the mirror refreshes at half rate;
+      // the texture stays valid because the reflection matrix only depends on the camera.
+      if ((still || reflCfg.every > 1) && reflCam.ready && reflCam.frame % 2 === 1) return;
+      reflection.update(scene, camera);
+      reflCam.matrix.copy(camera.matrixWorld);
+      reflCam.proj.copy(camera.projectionMatrix);
+      reflCam.ready = true;
     },
+    /** Reflection setup, for tests and the stats panel. */
+    reflectionInfo: () => (reflTier ? { ...reflTier, trimmed: reflectTrimmed, active: !!reflection } : null),
     hoverTargets() {
       return stocker.hoverObjects(staticHover.slice());
     },

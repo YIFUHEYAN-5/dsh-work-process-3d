@@ -33,9 +33,11 @@ const FRAGMENT = /* glsl */ `
 {
   vec2 reflUv = vReflCoord.xy / max(vReflCoord.w, 1e-4);
   float reflFres = pow(1.0 - clamp(dot(geometryNormal, geometryViewDir), 0.0, 1.0), 4.0);
-  float reflK = uReflStrength * reflMask * mix(0.3, 1.0, reflFres) * (1.0 - roughnessFactor * 0.9);
+  // Mirror-like: a strong base reflectance rising toward grazing angles. The lit diffuse part is
+  // only dimmed a little, so shadows on the floor stay readable under the reflection.
+  float reflK = uReflStrength * reflMask * mix(0.4, 1.0, reflFres) * (1.0 - roughnessFactor * 0.9);
   vec3 reflCol = texture2D(tReflect, reflUv, uReflBlur + roughnessFactor * 5.0).rgb;
-  outgoingLight = outgoingLight * (1.0 - reflK * 0.45) + reflCol * reflK;
+  outgoingLight = outgoingLight * (1.0 - reflK * 0.4) + reflCol * reflK;
 }
 `;
 
@@ -138,7 +140,11 @@ export function createReflection(renderer, { scale = 0.4, strength = 0.5, blur =
     const prevTarget = renderer.getRenderTarget();
     const prevAutoClear = renderer.autoClear;
     const prevShadow = renderer.shadowMap.autoUpdate;
+    // A pending shadow bake must wait for the main pass: the shadow map filters casters by the
+    // viewing camera's layers, and this camera does not see NO_REFLECT_LAYER.
+    const prevNeeds = renderer.shadowMap.needsUpdate;
     renderer.shadowMap.autoUpdate = false;
+    renderer.shadowMap.needsUpdate = false;
     renderer.setRenderTarget(target);
     renderer.state.buffers.depth.setMask(true);
     renderer.autoClear = false;
@@ -146,6 +152,7 @@ export function createReflection(renderer, { scale = 0.4, strength = 0.5, blur =
     renderer.render(scene, camera);
     renderer.autoClear = prevAutoClear;
     renderer.shadowMap.autoUpdate = prevShadow;
+    renderer.shadowMap.needsUpdate = prevNeeds;
     renderer.setRenderTarget(prevTarget);
     return true;
   }

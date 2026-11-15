@@ -175,7 +175,8 @@ export function createFactoryScene(container, opts = {}) {
   container.appendChild(labelLayer);
 
   // Far plane covers the city outside the atrium; the sky dome is drawn at the far plane.
-  const camera = new THREE.PerspectiveCamera(40, 1, 0.2, 700);
+  // Far plane reaches the city floor at the horizon (6 km) and the far landmark towers.
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.2, 9000);
   // Floors and floor decals live on their own layer so the reflection pass can skip them.
   camera.layers.enable(NO_REFLECT_LAYER);
   const controls = new OrbitControls(camera, canvas);
@@ -545,6 +546,8 @@ export function createFactoryScene(container, opts = {}) {
 
   // ── Pointer: hover and click ────────────────────────────────
   const raycaster = new THREE.Raycaster();
+  // Small parts live on the main-camera-only layer (kept out of the floor reflection); still pickable.
+  raycaster.layers.enable(NO_REFLECT_LAYER);
   const ndc = new THREE.Vector2();
   let pointer = null;
   let hoverDirty = false;

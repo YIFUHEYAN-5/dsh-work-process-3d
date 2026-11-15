@@ -43,7 +43,8 @@ function patchFloorVertex(shader) {
 
 /** Polished light stone around the well: 2.4 m slabs, a lit border along the well edge. */
 function stoneFloorMaterial(reflection) {
-  const m = new THREE.MeshStandardMaterial({ color: 0xd4d8de, metalness: 0, roughness: 0.18, name: 'atrium-floor' });
+  // Polished almost to a mirror; the diffuse part stays so sun shadows remain readable.
+  const m = new THREE.MeshStandardMaterial({ color: 0xd4d8de, metalness: 0, roughness: 0.07, name: 'atrium-floor' });
   m.onBeforeCompile = (shader) => {
     patchFloorVertex(shader);
     shader.fragmentShader = shader.fragmentShader
@@ -61,7 +62,7 @@ float seam = fLine(seamD, 0.003, px);
 diffuseColor.rgb *= (0.95 + 0.07 * tileN) * (1.0 - seam * 0.4);
 float reflMask = 1.0 - seam;`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-roughnessFactor = clamp(roughnessFactor + (tileN - 0.5) * 0.05 + seam * 0.5, 0.04, 1.0);`)
+roughnessFactor = clamp(roughnessFactor + (tileN - 0.5) * 0.04 + seam * 0.5, 0.03, 1.0);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 float border = fLine(abs(wellD - 0.62), 0.011, px);
 float ringD = length(vFloor - vec2(${ATRIUM.cx.toFixed(3)}, ${ATRIUM.cz.toFixed(3)}));
@@ -75,7 +76,7 @@ totalEmissiveRadiance += vec3(0.25, 0.75, 1.0) * border * 2.4 + vec3(1.0, 0.8, 0
 
 /** White island tops: 1.2 m tiles, a light line along the rim, the hub inlay of the robot cell. */
 function islandTopMaterial(reflection) {
-  const m = new THREE.MeshStandardMaterial({ color: 0xeef1f5, metalness: 0, roughness: 0.14, name: 'island-top' });
+  const m = new THREE.MeshStandardMaterial({ color: 0xeef1f5, metalness: 0, roughness: 0.05, name: 'island-top' });
   m.onBeforeCompile = (shader) => {
     patchFloorVertex(shader);
     shader.fragmentShader = shader.fragmentShader
@@ -96,7 +97,7 @@ float edge = smoothstep(-0.05, 0.0, islD);
 diffuseColor.rgb *= mix(0.97 + 0.04 * tileN, 0.88, inHub) * (1.0 - seam * 0.45 * (1.0 - inHub)) * (1.0 - edge * 0.3);
 float reflMask = (1.0 - seam * (1.0 - inHub)) * (1.0 - edge);`)
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-roughnessFactor = mix(clamp(roughnessFactor + (tileN - 0.5) * 0.04 + seam * 0.5, 0.04, 1.0), 0.07, inHub);`)
+roughnessFactor = mix(clamp(roughnessFactor + (tileN - 0.5) * 0.03 + seam * 0.5, 0.03, 1.0), 0.035, inHub);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 float rim = fLine(abs(islD + 0.07), 0.009, px);
 float ring = fLine(abs(hubD - (HUB_R - 0.2)), 0.014, px);
