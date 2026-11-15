@@ -6,6 +6,7 @@ Thumbs.db
 
 # whale mascot: renders, Tripo downloads and task log
 whale/preview/out/
+whale/viewer/out/
 whale/tripo/raw/
 whale/tripo/tasks.json
 whale/tripo/*_state.json

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeepSeek 鲸鱼娘 · 模型预览</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;font:13px/1.45 "Microsoft YaHei","PingFang SC","Noto Sans SC",sans-serif;color:#1f2740;background:#e9edf5}
+#app{display:flex;height:100%}
+#panel{width:292px;flex:none;overflow-y:auto;background:#f8f9fd;border-right:1px solid #d6dcea;padding:14px 14px 22px}
+#panel h1{font-size:17px;margin:0}
+.sub{margin:2px 0 0;color:#69738f;font-size:12px}
+section{margin-top:14px}
+h2{font-size:12px;font-weight:600;color:#56607c;margin:0 0 6px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:5px}
+.grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+button,select{font:inherit;color:inherit}
+.btn{border:1px solid #cdd4e4;background:#fff;border-radius:7px;padding:5px 6px;cursor:pointer;text-align:center}
+.btn:hover{border-color:#8fa3d8}
+.btn.on{background:#3f63d8;border-color:#3f63d8;color:#fff}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn small{display:block;font-size:10.5px;opacity:.65}
+.seg{display:flex;border:1px solid #cdd4e4;border-radius:7px;overflow:hidden}
+.seg .btn{flex:1;border:0;border-radius:0;border-left:1px solid #cdd4e4}
+.seg .btn:first-child{border-left:0}
+.chk{display:inline-flex;align-items:center;gap:4px;margin:3px 12px 3px 0;cursor:pointer}
+.issue{display:block;width:100%;text-align:left;margin-bottom:5px;padding:6px 8px}
+.issue b{display:block;font-weight:600}
+.issue span{font-size:11.5px;color:#5d6785}
+.issue.on span{color:#e3e9ff}
+#legend{margin-top:7px;font-size:11px;color:#56607c}
+#legend .bar{height:9px;border-radius:5px;background:linear-gradient(90deg,#cdd5e6 0%,#ffd64a 25%,#ff9628 50%,#e42434 75%,#821482 100%)}
+#legend .ticks{display:flex;justify-content:space-between;margin-top:2px}
+#legend p{margin:4px 0 0}
+#view{position:relative;flex:1;min-width:0;background:radial-gradient(ellipse at 50% 38%,#fbfcff 0%,#e6eaf3 62%,#d8deeb 100%)}
+#c{display:block;width:100%;height:100%;outline:none}
+#hud{position:absolute;left:14px;top:12px;pointer-events:none}
+#stat{font-size:13px;color:#2d3655;white-space:pre-line;text-shadow:0 1px 0 #fff}
+#note{position:absolute;right:14px;top:12px;width:360px;max-width:calc(100% - 28px);background:rgba(255,255,255,.95);border:1px solid #d3d9e8;border-radius:10px;padding:10px 12px;font-size:12.5px;box-shadow:0 6px 18px rgba(40,50,90,.10)}
+#note h3{margin:0 22px 4px 0;font-size:14px}
+#note p{margin:4px 0}
+#note-close{position:absolute;right:8px;top:6px;border:0;background:none;font-size:17px;cursor:pointer;color:#69738f}
+#bar{position:absolute;left:14px;right:14px;bottom:30px;display:flex;align-items:center;gap:10px;background:rgba(255,255,255,.92);border:1px solid #d3d9e8;border-radius:10px;padding:6px 10px}
+#play{width:34px}
+#seek{flex:1}
+#time{font-variant-numeric:tabular-nums;min-width:104px;text-align:right;color:#4b5573}
+#help{position:absolute;left:0;right:0;bottom:8px;text-align:center;font-size:11.5px;color:#7a84a0;pointer-events:none}
+#loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:15px;color:#4b5573;background:#e9edf5;padding:20px;text-align:center}
+body.noui #panel,body.noui #bar,body.noui #help,body.noui #note,body.noui #hud{display:none}
+</style>
+</head>
+<body data-built="__BUILT__">
+<div id="app">
+  <aside id="panel">
+    <h1>DeepSeek 鲸鱼娘</h1>
+    <p class="sub">绑骨模型离线预览 · 生成于 __BUILT__</p>
+    <section><h2>动作</h2><div id="clips" class="grid"></div></section>
+    <section><h2>着色</h2><div id="shade" class="seg"></div>
+      <div id="legend" hidden><div class="bar"></div><div class="ticks"><span>正常</span><span>轻微</span><span>超标</span><span>严重</span><span>×3 以上</span></div>
+      <p>颜色表示这个点附近的边被拉长或压短了多少。边长拉长超过 35% 或缩短超过 30% 算变形过大（橙色及以上），和仓库里的蒙皮评估是同一个标准；左上角的数字就是这样的三角形有多少个。</p></div></section>
+    <section><h2>蒙皮权重</h2><div id="weights" class="seg"></div></section>
+    <section><h2>显示</h2>
+      <label class="chk"><input type="checkbox" id="chk-outline">描边</label>
+      <label class="chk"><input type="checkbox" id="chk-tail">尾巴</label>
+      <label class="chk"><input type="checkbox" id="chk-ahoge">呆毛</label>
+      <label class="chk"><input type="checkbox" id="chk-bones">骨骼</label></section>
+    <section><h2>视角</h2><div id="views" class="grid4"></div>
+      <label class="chk" style="margin-top:6px"><input type="checkbox" id="chk-rot">自动旋转</label></section>
+    <section><h2>问题定位（点一下跳到对应画面）</h2><div id="issues"></div></section>
+  </aside>
+  <main id="view">
+    <canvas id="c" tabindex="0"></canvas>
+    <div id="hud"><div id="stat"></div></div>
+    <div id="note" hidden><button id="note-close" title="关闭">×</button><h3 id="note-title"></h3><div id="note-text"></div></div>
+    <div id="bar"><button id="play" class="btn">❚❚</button><input id="seek" type="range" min="0" max="1000" value="0"><span id="time"></span>
+      <select id="speed" title="播放速度"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1">1×</option></select></div>
+    <div id="help">左键拖动旋转 · 右键拖动平移 · 滚轮缩放 · 空格 播放/暂停 · ←/→ 逐帧</div>
+    <div id="loading">正在加载模型…</div>
+  </main>
+</div>
+<!--DATA-->
+<!--SCRIPT-->
+</body>
+</html>

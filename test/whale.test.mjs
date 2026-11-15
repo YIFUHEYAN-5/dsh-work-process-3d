@@ -2,6 +2,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import * as THREE from 'three';
 import { createTail } from '../whale/src/tail.js';
 
@@ -78,4 +82,25 @@ test('tail hangs behind the legs instead of swinging up when the pelvis bows', (
   const rigid = tip(0), hanging = tip(0.8);
   assert.ok(hanging.reach < rigid.reach - 0.1, 'reach behind the pelvis ' + hanging.reach.toFixed(3) + ' m hanging vs ' + rigid.reach.toFixed(3) + ' m rigid');
   assert.ok(hanging.dz < 0, 'flukes behind the pelvis');
+});
+
+test('offline viewer: build.mjs inlines the rigged model and the bundle into one HTML file', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whale-viewer-'));
+  try {
+    const out = path.join(dir, 'viewer.html');
+    // a --tripo file that does not exist: the build must still work, only without the Tripo weight switch
+    execFileSync(process.execPath, [fileURLToPath(new URL('../whale/viewer/build.mjs', import.meta.url)), '--tripo', path.join(dir, 'missing.glb'), '--out', out], { stdio: 'pipe' });
+    const html = fs.readFileSync(out, 'utf8');
+    const glb = html.match(/<script type="application\/octet-stream" id="whale-glb">([^<]*)<\/script>/);
+    assert.ok(glb, 'model block');
+    assert.ok(Buffer.from(glb[1], 'base64').equals(fs.readFileSync(new URL('../whale/assets/whale_rigged.glb', import.meta.url))), 'model block decodes to whale_rigged.glb');
+    assert.ok(!html.includes('id="tripo-weights"'), 'no Tripo weights without the --tripo file');
+    for (const marker of ['__BUILT__', '<!--DATA-->', '<!--SCRIPT-->']) assert.ok(!html.includes(marker), marker + ' replaced');
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+    assert.equal(scripts.length, 1, 'one inline bundle');
+    assert.ok(scripts[0][1].length > 100000, 'bundle includes three.js');
+    assert.ok(!/import\s*\(|\bimport\s+[\w{*]/.test(scripts[0][1].slice(0, 2000)), 'no module imports left in the bundle');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
