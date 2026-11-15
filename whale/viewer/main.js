@@ -1,6 +1,6 @@
 // Offline viewer for the rigged whale girl. build.mjs bundles this file, three.js and the model into one HTML file that
 // opens by double-click (file://) without a server or network access.
-// Optional URL parameters: clip=<clip|bind> t=<s> play=0|1 speed=<x> view=<name> shade=toon|flat|heat w=fixed|tripo
+// Optional URL parameters: clip=<clip|bind> t=<s> play=0|1 speed=<x> view=<name> shade=toon|flat|heat|zones w=fixed|tripo
 // outline=0|1 tail=0|1 ahoge=0|1 bones=0|1 rot=0|1 issue=<id> ui=0. The title turns into "READY {...}" once the first
 // frames are drawn; window.whaleViewer exposes the controls plus evalClip() for scripted checks.
 import * as THREE from 'three';
@@ -20,7 +20,7 @@ const LABEL = Object.fromEntries(CLIPS);
 // target + the 3rd entry, so the close-ups follow her when a clip moves the head, chest or hands. Her left is +x.
 const VIEWS = [['front', '正面', [0, 0.8, 3.1], [0, 0.68, 0]], ['34', '斜侧', [2.1, 1.0, 2.3], [0, 0.68, 0]],
   ['side', '侧面', [3.1, 0.8, 0], [0, 0.68, 0]], ['back', '背面', [0, 0.9, -3.1], [0, 0.7, 0]],
-  ['face', '脸', [0, 0.02, 0.75], [0, 0.13, 0.03], 'Head'], ['chest', '胸口', [0.3, 0.1, 1.15], [0, 0.05, 0], 'Spine02'],
+  ['face', '脸', [0, 0.02, 0.75], [0, 0.13, 0.03], 'Head'], ['face34', '脸斜侧', [0.42, 0.03, 0.62], [0, 0.13, 0.03], 'Head'], ['chest', '胸口', [0.3, 0.1, 1.15], [0, 0.05, 0], 'Spine02'],
   ['handL', '左手', [0.24, 0.04, 0.4], [0, -0.05, 0], 'L_Hand'], ['handR', '右手', [-0.24, 0.04, 0.4], [0, -0.05, 0], 'R_Hand'],
   ['skirt', '裙摆', [0.95, 0.5, 1.6], [0, 0.42, 0]], ['backlow', '背后低', [0.9, 0.55, -1.7], [0, 0.5, 0]]];
 const TAIL = { sway: 0.1, swing: 0.035, curl: 0, hang: 0.8 };
@@ -138,6 +138,16 @@ async function init() {
   const P = geo.attributes.position.array, NV = geo.attributes.position.count;
   const baseCol = geo.attributes.color || null;
   const heatCol = new THREE.BufferAttribute(new Uint8Array(NV * 4).fill(255), 4, true);
+  // toon zones baked by whale/tools/rig/toon_zones.py: face orange, hair blue, other skin pink, the rest grey
+  const tz = geo.attributes.toon, zoneCol = tz ? new THREE.BufferAttribute(new Uint8Array(NV * 4).fill(255), 4, true) : null;
+  if (tz) {
+    const a = tz.array, c = zoneCol.array, Z = [[200, 204, 214], [244, 168, 176], [86, 124, 232], [255, 176, 40]].map(x => x.map(v => 255 * lin(v / 255)));
+    for (let v = 0; v < NV; v++) {
+      const f = a[4 * v] / 255, h = a[4 * v + 2] / 255, s = a[4 * v + 3] / 255;
+      for (let k = 0; k < 3; k++) { let x = Z[0][k] + (Z[1][k] - Z[0][k]) * s; x += (Z[2][k] - x) * h; x += (Z[3][k] - x) * f; c[4 * v + k] = x; }
+    }
+  }
+  const zoneMat = new THREE.MeshBasicMaterial({ vertexColors: true });
   const D = new Float32Array(NV * 3), sev = new Float32Array(NV), M = new Float32Array(16 * mesh.skeleton.bones.length), m4 = new THREE.Matrix4();
   const edgeCache = {}, hv2 = new THREE.Vector3();
   function edges(which) {
@@ -213,10 +223,10 @@ async function init() {
     poseAt(t); syncUI();
   }
   function setShade(mode) {
-    if (!['toon', 'flat', 'heat'].includes(mode)) return;
+    if (!['toon', 'flat', 'heat', 'zones'].includes(mode) || (mode === 'zones' && !zoneCol)) return;
     S.shade = mode;
-    for (const m of skinned) m.material = mode === 'flat' ? flat.get(m) : mode === 'heat' ? heatMat : toon.get(m);
-    if (mode === 'heat') geo.setAttribute('color', heatCol); else if (baseCol) geo.setAttribute('color', baseCol);
+    for (const m of skinned) m.material = mode === 'flat' ? flat.get(m) : mode === 'heat' ? heatMat : mode === 'zones' ? zoneMat : toon.get(m);
+    if (mode === 'heat') geo.setAttribute('color', heatCol); else if (mode === 'zones') geo.setAttribute('color', zoneCol); else if (baseCol) geo.setAttribute('color', baseCol);
     tail.meshes[0].material = tail.meshes[2].material = mode === 'flat' ? tailFlat : tailToon;
     ahoge.mesh.material = mode === 'flat' ? ahFlat : ahToon;
     dirty = true; syncUI();
@@ -272,7 +282,7 @@ async function init() {
   // ---- UI
   const btn = (label, cls, on) => { const b = document.createElement('button'); b.className = 'btn ' + (cls || ''); b.innerHTML = label; b.onclick = on; return b; };
   for (const [id, label] of CLIPS) { const b = btn(label + '<small>' + (id === 'bind' ? 'A-pose' : id) + '</small>', '', () => { S.issue = null; setClip(id); if (id !== 'bind') setPlaying(true); }); b.dataset.clip = id; $('clips').append(b); }
-  for (const [id, label] of [['toon', '卡通'], ['flat', '原贴图'], ['heat', '变形热图']]) { const b = btn(label, '', () => setShade(id)); b.dataset.shade = id; $('shade').append(b); }
+  for (const [id, label] of [['toon', '卡通'], ['flat', '原贴图'], ['heat', '变形热图'], ['zones', '分区']]) { if (id === 'zones' && !zoneCol) continue; const b = btn(label, '', () => setShade(id)); b.dataset.shade = id; $('shade').append(b); }
   for (const [id, label] of [['fixed', '修复后'], ['tripo', 'Tripo 原始']]) { const b = btn(label, '', () => setWeights(id)); b.dataset.w = id; if (id === 'tripo' && !tripo) { b.disabled = true; b.title = '生成这个文件时没有找到 Tripo 原始下载'; } $('weights').append(b); }
   for (const [id, label] of VIEWS.map(v => [v[0], v[1]])) { const b = btn(label, '', () => setView(id)); b.dataset.view = id; $('views').append(b); }
   for (const it of ISSUES) { const b = btn('<b>' + it.title + '</b><span>' + it.sub + '</span>', 'issue', () => showIssue(it.id)); b.dataset.issue = it.id; $('issues').append(b); }
@@ -301,7 +311,7 @@ async function init() {
     for (const b of document.querySelectorAll('[data-view]')) b.classList.toggle('on', b.dataset.view === S.view);
     for (const b of document.querySelectorAll('[data-issue]')) b.classList.toggle('on', b.dataset.issue === S.issue);
     for (const k of ['outline', 'tail', 'ahoge', 'bones', 'rot']) $('chk-' + k).checked = S[k];
-    $('legend').hidden = S.shade !== 'heat';
+    $('legend').hidden = S.shade !== 'heat'; $('legend-zones').hidden = S.shade !== 'zones';
     $('play').textContent = S.playing ? '❚❚' : '▶'; $('play').title = S.playing ? '暂停（空格）' : '播放（空格）';
     $('speed').value = String(S.speed);
     syncBar();
