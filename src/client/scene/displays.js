@@ -1,7 +1,7 @@
 // Canvas-painted dials, plates and screens used across the machine.
 import { canvasTexture, FONT_SANS, FONT_MONO, TAU } from './util.js';
 
-function roundRect(g, x, y, w, h, r) {
+export function roundRect(g, x, y, w, h, r) {
   g.beginPath();
   g.moveTo(x + r, y);
   g.arcTo(x + w, y, x + w, y + h, r);
@@ -11,7 +11,8 @@ function roundRect(g, x, y, w, h, r) {
   g.closePath();
 }
 
-function fitText(g, text, maxW, size, weight, family) {
+/** Shrink the font until `text` fits in maxW; sets g.font and returns the size used. */
+export function fitText(g, text, maxW, size, weight, family) {
   let s = size;
   g.font = `${weight} ${s}px ${family}`;
   while (s > 8 && g.measureText(text).width > maxW) {

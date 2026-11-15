@@ -37,7 +37,7 @@ const KEYS = {
  * `keyTarget` is a focusable element that receives keyboard input; it is focused on pointer down.
  */
 export function createLookControls(camera, element, opts = {}) {
-  const { keyTarget = null, clampPosition = (v) => v, floorY = 0, onStart = null, onChange = null } = opts;
+  const { keyTarget = null, clampPosition = (v) => v, floorY = 0, onStart = null, onChange = null, reducedMotion = () => false } = opts;
   let enabled = false;
   let yaw = 0;
   let pitch = 0;
@@ -173,7 +173,8 @@ export function createLookControls(camera, element, opts = {}) {
     }
     end.y = floorY + EYE;
     const dist = end.distanceTo(camera.position);
-    glide = { t: 0, d: clamp(dist / 6, 0.45, 1.6), p0: camera.position.clone(), p1: end };
+    // With reduced motion the walk is a single step (still through clampPosition).
+    glide = { t: 0, d: reducedMotion() ? 1e-3 : clamp(dist / 6, 0.45, 1.6), p0: camera.position.clone(), p1: end };
     start();
   }
 

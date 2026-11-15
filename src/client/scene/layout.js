@@ -40,7 +40,9 @@ export const CAMERA_LIMIT = {
   balconyYMax: 3.85,
   edge: 1.5 * DEG,
   targetR: 17,
-  targetYMin: 0,
+  // Orbit targets stay a little above the floor (and below the ceiling) so the camera always
+  // has room to swing under or over them.
+  targetYMin: 0.4,
   targetYMax: 12,
 };
 

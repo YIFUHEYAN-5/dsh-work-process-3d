@@ -671,38 +671,89 @@ function glowMat(shared, hex, gain, additive = false) {
   });
 }
 
-// Tapered beam: thin where it enters the hall, a few pixels wide at the far emitter.
+// Tapered beam from the compute tower to the fuel tank: thin where it enters the hall, wider at the
+// far emitter. It is never drawn thinner than uMinPx pixels: where it would be, the tube widens
+// and dims by the same factor (vThin), so the far end stays a smooth line instead of dots.
+// uPixel = world size of one pixel at unit distance, set per camera before rendering.
 const BEAM_VERT = /* glsl */ `
 uniform float uLen;
+uniform float uPixel;
+uniform float uMinPx;
 varying float vAlong;
 varying float vEdge;
+varying float vThin;
 void main() {
   vAlong = position.y * uLen;
-  vec4 wp = modelMatrix * vec4(position, 1.0);
-  vec3 n = normalize(mat3(modelMatrix) * normalize(vec3(position.x, 0.0, position.z) + vec3(1e-5, 0.0, 0.0)));
-  vec3 v = normalize(cameraPosition - wp.xyz);
-  vEdge = abs(dot(n, v));
-  gl_Position = projectionMatrix * viewMatrix * wp;
+  vec3 axis = (modelMatrix * vec4(0.0, position.y, 0.0, 1.0)).xyz;
+  vec3 radial = mat3(modelMatrix) * vec3(position.x, 0.0, position.z);
+  float r = max(length(radial), 1e-5);
+  float grow = max(1.0, distance(cameraPosition, axis) * uPixel * uMinPx / r);
+  vThin = 1.0 / grow;
+  vec3 wp = axis + radial * grow;
+  vec3 v = normalize(cameraPosition - wp);
+  vEdge = abs(dot(radial / r, v));
+  gl_Position = projectionMatrix * viewMatrix * vec4(wp, 1.0);
 }
 `;
 
+// Soft cross-section (bright core, faint wide halo) and soft energy packets that travel toward the
+// tank. Packet spacing grows with distance (log scale) so they look evenly spaced in perspective:
+// about 9 m apart inside the hall, a few hundred metres near the tower. The colour stays below the
+// bloom threshold, so the beam reads as cyan light rather than a white band.
 const BEAM_FRAG = /* glsl */ `
 uniform float uIntensity;
-uniform float uTime;
+uniform float uFlow;
 uniform float uLen;
 uniform float uCore;
 uniform vec3 uColor;
 varying float vAlong;
 varying float vEdge;
+varying float vThin;
 void main() {
-  float prof = uCore > 0.5 ? pow(vEdge, 0.7) : pow(vEdge, 2.5) * 0.35;
-  // Pulses evenly spaced in log distance, so they look evenly spaced on screen, moving toward the tank.
-  float pulse = pow(fract(log(vAlong + 3.0) * 6.0 + uTime * 3.0), 8.0);
-  float ends = smoothstep(0.0, 1.5, vAlong) * smoothstep(0.0, 6.0, uLen - vAlong);
-  float k = prof * (0.55 + 2.2 * pulse) * ends * uIntensity;
-  gl_FragColor = vec4(uColor * (3.0 * k), 1.0);
+  float prof = uCore > 0.5 ? pow(vEdge, 1.6) : pow(vEdge, 3.0) * 0.22;
+  float p = fract(log(vAlong + 24.0) * 3.2 + uFlow);
+  float pulse = exp(-(p - 0.5) * (p - 0.5) * 25.0);
+  float ends = smoothstep(0.0, 1.2, vAlong) * smoothstep(0.0, 8.0, uLen - vAlong);
+  float k = prof * (0.6 + 0.9 * pulse) * ends * uIntensity * vThin;
+  gl_FragColor = vec4(uColor * k, 1.0);
 }
 `;
+
+// Soft camera-facing glow where the beam lands on the tank.
+const FLARE_VERT = /* glsl */ `
+uniform float uSize;
+varying vec2 vUv;
+void main() {
+  vUv = uv - 0.5;
+  vec4 mv = modelViewMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+  mv.xy += position.xy * uSize;
+  gl_Position = projectionMatrix * mv;
+}
+`;
+
+const FLARE_FRAG = /* glsl */ `
+uniform vec3 uColor;
+uniform float uIntensity;
+varying vec2 vUv;
+void main() {
+  float r = length(vUv) * 2.0;
+  float glow = exp(-r * r * 10.0) + 0.22 * exp(-r * 4.5);
+  float k = glow * (1.0 - smoothstep(0.8, 1.0, r)) * uIntensity;
+  gl_FragColor = vec4(uColor * k, 1.0);
+}
+`;
+
+const BEAM_MIN_PX = 1.4;
+const _drawSize = new THREE.Vector2();
+
+// World size of one pixel at unit distance for the camera and target being rendered (the floor
+// mirror renders with its own camera and a smaller target).
+function pixelAngle(renderer, camera) {
+  const target = renderer.getRenderTarget();
+  const height = target ? target.height : renderer.getDrawingBufferSize(_drawSize).y;
+  const p = camera.projectionMatrix.elements[5];
+  return height > 0 && p > 0 ? 2 / (p * height) : 0;
+}
 
 const TETHER_VERT = /* glsl */ `
 ${CITY_GLSL}
@@ -741,6 +792,36 @@ function radialTube(radiusBottom, radiusTop, segments = 16) {
   return new THREE.CylinderGeometry(radiusTop, radiusBottom, 1, segments, 1, true).translate(0, 0.5, 0);
 }
 
+// Open tube along +y from 0 to 1 whose rings crowd toward y = 0 (the tank end, near the camera),
+// so the per-vertex minimum width follows the camera distance closely where it changes fastest.
+export function beamTube(radiusBottom, radiusTop, segments = 12, rings = 48, crowd = 5) {
+  const pos = [];
+  const index = [];
+  const norm = Math.exp(crowd) - 1;
+  for (let i = 0; i <= rings; i++) {
+    const y = (Math.exp((crowd * i) / rings) - 1) / norm;
+    const r = radiusBottom + (radiusTop - radiusBottom) * y;
+    for (let j = 0; j < segments; j++) {
+      const a = (j / segments) * Math.PI * 2;
+      pos.push(Math.cos(a) * r, y, Math.sin(a) * r);
+    }
+  }
+  for (let i = 0; i < rings; i++) {
+    for (let j = 0; j < segments; j++) {
+      const a = i * segments + j;
+      const b = i * segments + ((j + 1) % segments);
+      const c = a + segments;
+      const d = b + segments;
+      index.push(a, c, b, b, c, d);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(index);
+  geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0.5, 0), Math.max(0.5, radiusTop) + 0.5);
+  return geo;
+}
+
 function buildComputeTower(shared, t, beamTo) {
   const group = new THREE.Group();
   group.name = 'compute-tower';
@@ -776,35 +857,65 @@ function buildComputeTower(shared, t, beamTo) {
   const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), delta.clone().normalize());
   const uniforms = {
     uIntensity: { value: 0.1 },
-    uTime: shared.uTime,
+    uFlow: { value: 0 },
     uLen: { value: len },
-    uColor: { value: new THREE.Color(0x5fdcff) },
+    uPixel: { value: 0.0005 },
+    uMinPx: { value: BEAM_MIN_PX },
+    uColor: { value: new THREE.Color(0x4fd6ff) },
   };
-  for (const [r0, r1, core] of [[0.07, 2.0, 1], [0.38, 8.0, 0]]) {
+  const beams = [];
+  // [radius at the tank, radius at the emitter, core?, minimum radius in pixels]
+  for (const [r0, r1, core, minPx] of [[0.05, 1.6, 1, BEAM_MIN_PX], [0.32, 7.0, 0, BEAM_MIN_PX * 3]]) {
     const mat = new THREE.ShaderMaterial({
       name: core ? 'beam-core' : 'beam-glow',
       vertexShader: BEAM_VERT,
       fragmentShader: BEAM_FRAG,
-      uniforms: { ...uniforms, uCore: { value: core } },
+      uniforms: { ...uniforms, uCore: { value: core }, uMinPx: { value: minPx } },
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
       side: THREE.DoubleSide,
     });
-    const beam = new THREE.Mesh(radialTube(r0, r1, 16), mat);
+    const beam = new THREE.Mesh(beamTube(r0, r1, core ? 12 : 16, 48), mat);
+    beam.name = mat.name;
     beam.position.copy(beamTo);
     beam.quaternion.copy(q);
     beam.scale.set(1, len, 1);
     beam.frustumCulled = false;
     beam.renderOrder = 3;
+    // The main view and the floor mirror use different cameras and target sizes.
+    beam.onBeforeRender = (renderer, scene, camera) => {
+      uniforms.uPixel.value = pixelAngle(renderer, camera);
+      mat.uniformsNeedUpdate = true;
+    };
     group.add(beam);
+    beams.push(beam);
   }
   const recvMat = new THREE.MeshBasicMaterial({ name: 'beam-receiver' });
-  recvMat.color.setHex(0x5fdcff).multiplyScalar(4);
-  const receiver = new THREE.Mesh(new THREE.TorusGeometry(0.5, 0.05, 8, 48), recvMat);
+  recvMat.color.setHex(0x4fd6ff).multiplyScalar(2.2);
+  const receiver = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.035, 8, 48), recvMat);
   receiver.rotation.x = Math.PI / 2;
   receiver.position.copy(beamTo);
   group.add(receiver);
+  const flareUniforms = { uSize: { value: 1.6 }, uIntensity: { value: 0.3 }, uColor: uniforms.uColor };
+  const flare = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 1),
+    new THREE.ShaderMaterial({
+      name: 'beam-flare',
+      vertexShader: FLARE_VERT,
+      fragmentShader: FLARE_FRAG,
+      uniforms: flareUniforms,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+  );
+  flare.name = 'beam-flare';
+  flare.position.copy(beamTo);
+  flare.frustumCulled = false;
+  flare.renderOrder = 4;
+  group.add(flare);
+  let flow = 0;
   group.traverse((o) => {
     if (o.isMesh && o.renderOrder === 0) o.renderOrder = 5;
   });
@@ -816,12 +927,21 @@ function buildComputeTower(shared, t, beamTo) {
       crownMat.uniforms.uGain.value = 4 * (0.35 + 0.65 * city.neon);
       spireMat.uniforms.uColor.value.set(city.body);
     },
-    update(t, activity, look) {
-      uniforms.uIntensity.value = Math.max(0.08, activity) * look;
+    // activity 0..1 (smoothed by the city); look = how strongly the current look lets neon glow.
+    update(dt, t, activity, look) {
+      // Packets flow faster while tokens are generated; the phase only matters modulo 1.
+      flow = (flow + Math.min(0.1, Math.max(0, dt)) * (0.25 + 1.1 * activity)) % 1;
+      uniforms.uFlow.value = flow;
+      uniforms.uIntensity.value = (0.22 + 0.78 * activity) * look * 0.95;
       emitter.scale.setScalar(0.6 + activity * 0.8);
-      receiver.scale.setScalar(0.8 + activity * 0.6 + Math.sin(t * 6) * 0.05 * activity);
+      const breathe = Math.sin(t * 4.2) * 0.04 * activity;
+      receiver.scale.setScalar(0.85 + activity * 0.4 + breathe);
+      flareUniforms.uSize.value = 1.0 + 1.1 * activity + breathe * 4;
+      flareUniforms.uIntensity.value = (0.12 + 0.55 * activity) * look;
       crown.rotation.z = t * 0.12;
     },
+    beams,
+    flare,
     glows,
   };
 }
@@ -933,7 +1053,7 @@ export function buildCity({ quality = 'high', beamTarget = new THREE.Vector3(-8,
       shared.uTravel.value = travel;
       shared.uAir.value = air;
       shared.uDensity.value = (0.3 + 0.7 * activity) * trafficScale;
-      compute.update(t, activity, beamLook);
+      compute.update(dt, t, activity, beamLook);
       extras.update(t);
       billboard.update(dt, info);
     },

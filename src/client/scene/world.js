@@ -5,14 +5,17 @@ import { createReflection, NO_REFLECT_LAYER } from './reflection.js';
 import { BRIGHTNESS, DEFAULT_LOOK, lookOf } from './looks.js';
 import { buildFuel, TANK_POS } from './fuel.js';
 import { buildEngine } from './engine.js';
-import { buildCell } from './cell.js';
+import { buildCell, ringPos, RING_R } from './cell.js';
 import { buildStations } from './stations.js';
 import { buildStocker } from './stocker.js';
 import { createEffects } from './effects.js';
 import { createWaferKit } from './wafer.js';
 import { createDirector } from './director.js';
-import { buildScreens } from './screens.js';
+import { buildScreens, SCREENS } from './screens.js';
 import { buildChannels } from './channels.js';
+import { buildLiving } from './living.js';
+import { buildDock } from './dock.js';
+import { solidsFromScene } from './camspace.js';
 import { disposeTree, damp, clamp } from './util.js';
 import { priceFor, isPeak, affordableTokens } from '../../model/pricing.js';
 import { formatTokens } from '../format.js';
@@ -23,9 +26,13 @@ export const CAMERA_PRESETS = {
   fuel: { pos: [-5.6, 2.7, 4.4], target: [-7.6, 1.4, -0.4] },
   engine: { pos: [-1.8, 2.9, 4.8], target: [-3.9, 1.2, -0.5] },
   stations: { pos: [2.6, 6.2, 6.6], target: [2.6, 0.9, -1.2] },
+  // The subagent dock from the right, over the data pool, with the glass facade behind it.
+  dock: { pos: [-1.0, 3.3, -6.6], target: [-5.3, 1.8, -5.0] },
   products: { pos: [6.1, 2.9, 5.6], target: [8.3, 1.1, 0.4] },
   // Standing at the balcony rail, looking out over the city toward the setting sun.
   balcony: { pos: [0.5, 1.7, 23.4], target: [-7.0, -0.4, 41.8], mode: 'look' },
+  // Behind the media wall: the living quarters, seen from the right with the city behind.
+  living: { pos: [5.6, 3.3, -14.6], target: [0.5, 0.9, -17.2] },
 };
 
 /**
@@ -59,12 +66,24 @@ function trimReflection(scene, minRadius) {
 
 const NICE = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
 
+// Fuel readout note under "— —" when no balance is known (live.balanceStatus). Bilingual like
+// every other in-scene plate; the HUD card and tooltip explain the next step in the UI language.
+const BALANCE_NOTES = {
+  loading: '读取中 · loading',
+  'signed-out': '未登录账户 · not signed in',
+  'no-host': '重启 DSH 后显示 · restart DSH',
+  failed: '查询失败 · query failed',
+  unavailable: '余额不可用 · balance unavailable',
+};
+
 /**
  * Build the complete factory scene for one quality tier. The returned object is driven by
  * `setState` (reduced session model) and `setLive` (stream ticks); `setLook` switches between
- * the dusk and day looks, `setBrightness` scales exposure.
+ * the dusk and day looks, `setBrightness` scales exposure, `setDemo` marks fictional data and
+ * `resetState` clears everything a session left behind.
  */
-export function buildWorld(renderer, quality, { environment = true, demo = false, look = DEFAULT_LOOK, brightness = BRIGHTNESS.initial } = {}) {
+export function buildWorld(renderer, quality, { environment = true, demo: demoInit = false, look = DEFAULT_LOOK, brightness = BRIGHTNESS.initial } = {}) {
+  let demo = !!demoInit;
   const scene = new THREE.Scene();
   // The sky dome draws the background; no fog (the city outside applies its own haze).
   scene.background = null;
@@ -97,16 +116,22 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
   const stocker = buildStocker(M, wafers);
   const screens = buildScreens(M, null, { demo });
   const channels = buildChannels();
+  const living = buildLiving(M);
+  // Drones collect their task capsule above the cobot station (subagent and workflow calls).
+  const cobot = stations.byKind.robot;
+  const dock = buildDock(M, { pickup: cobot ? ringPos(cobot.theta, RING_R + 0.55, 2.45) : null });
   const dynamic = new THREE.Group();
   dynamic.name = 'wafers';
-  scene.add(stage.root, channels.root, screens.root, fuel.root, engine.root, cell.root, stations.root, stocker.root, fx.root, dynamic);
+  scene.add(stage.root, channels.root, screens.root, fuel.root, engine.root, cell.root, stations.root, stocker.root, living.root, dock.root, dock.fleet, fx.root, dynamic);
   const director = createDirector({ cell, stations, stocker, engine, wafers, root: dynamic });
   // Wafers and FOUPs are created later and stay in the reflection.
   const reflectTrimmed = reflTier ? trimReflection(scene, REFLECT_MIN_RADIUS) : 0;
   const reflCam = { frame: 0, matrix: new THREE.Matrix4(), proj: new THREE.Matrix4(), ready: false };
+  // Boxes the camera keeps out of (machines tagged userData.solid), measured once.
+  const solids = solidsFromScene(scene);
 
   const staticHover = [];
-  for (const h of [...fuel.hover, ...engine.hover, ...cell.hover, ...stations.list.flatMap((s) => s.hover), ...stocker.hover]) {
+  for (const h of [...fuel.hover, ...engine.hover, ...cell.hover, ...stations.list.flatMap((s) => s.hover), ...stocker.hover, ...dock.hover, ...living.hover, ...screens.hover]) {
     h.object.userData.hoverId = h.id;
     staticHover.push(h.object);
   }
@@ -115,12 +140,15 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
     { id: 'tank', anchor: fuel.anchors.tank },
     { id: 'engine', anchor: engine.anchors.engine },
     { id: 'robot', anchor: cell.anchors.robot.clone().setY(1.75) },
-    ...stations.list.map((s) => ({ id: `station:${s.kind}`, anchor: s.anchor })),
+    // Up close the station's own holo readout says the same, so its label steps aside.
+    ...stations.list.map((s) => ({ id: `station:${s.kind}`, anchor: s.anchor, accent: s.accent, near: 6.5 })),
     { id: 'loadport', anchor: stocker.anchors.loadPort.clone().setY(1.55) },
     { id: 'stocker', anchor: stocker.anchors.stocker.clone().setY(1.25) },
+    { id: 'dock', anchor: dock.labelAnchor },
+    { id: 'living', anchor: living.labelAnchor },
   ];
 
-  const live = { phase: 'idle', tps: 0, balance: null, currency: 'CNY' };
+  const live = { phase: 'idle', tps: 0, balance: null, currency: 'CNY', balanceStatus: 'unavailable' };
   const screenInfo = { state: null, live, tps: 0, peak: false };
   const stageInfo = { activity: 0, tps: 0, model: '', phase: 'idle' };
   let state = null;
@@ -142,7 +170,7 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
       : { text: '燃料 · 账户余额   FUEL', size: 30, color: '#7f9cff', weight: 700, gap: 50 }];
     if (bal == null) {
       lines.push({ text: '— —', size: 88, color: '#8c97ad', weight: 700, mono: true, gap: 108 });
-      lines.push({ text: '余额不可用 · balance unavailable', size: 28, color: '#8c97ad', gap: 56 });
+      lines.push({ text: BALANCE_NOTES[live.balanceStatus] || BALANCE_NOTES.unavailable, size: 28, color: '#8c97ad', gap: 56 });
     } else {
       lines.push({ text: `${sym} ${bal.toFixed(2)}`, size: 92, color: '#e9f0ff', weight: 700, mono: true, gap: 108 });
       const tok = live.currency === 'USD' ? 0 : affordableTokens(bal, price, peak);
@@ -185,6 +213,13 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
     key: stage.key,
     presets: CAMERA_PRESETS,
     labelAnchors,
+    solids,
+    /** Where a character can sit, sleep, eat, work or stand in the living quarters. */
+    mascotAnchors: living.anchors,
+    /** Media-wall screens, left to right as seen from the hall: { id, a, a0, a1, y0, y1, w, h, px }. */
+    screenDefs: SCREENS,
+    /** Draw `id` at `scale`× resolution for a close-up (null puts every screen back to 1×). */
+    setScreenDetail: (id, scale = 2) => screens.setDetail(id, scale),
     /** Post-processing settings of the current look and brightness (read by the renderer). */
     get post() {
       return { ...lookDef.post, exposure: lookDef.exposure * bright };
@@ -209,17 +244,51 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
       errors = next.tools.errors;
       state = next;
       director.sync(next);
+      dock.sync(next.agents, next.workflows);
+      stations.setStats(next);
       readoutT = Math.max(readoutT, 0.45);
     },
     setLive(next) {
       if (!next) return;
       Object.assign(live, next);
     },
+    isDemo: () => demo,
+    /** Mark the data as fictional (demo) or real; only the readouts change. */
+    setDemo(on) {
+      if (demo === !!on) return;
+      demo = !!on;
+      screens.setDemo(demo);
+      readoutT = 1;
+    },
+    /** Forget the session shown so far (another session or another data source follows). */
+    resetState() {
+      state = null;
+      errors = 0;
+      errorPulse = false;
+      maxBalance = 0;
+      director.reset();
+      dock.reset();
+      stations.setStats(null);
+      screens.reset();
+      readoutT = 1;
+    },
+    /** Live state of a labelled machine for its label dot: 'working', 'error' or ''. */
+    labelState(id) {
+      if (id.startsWith('station:')) {
+        const s = stations.byKind[id.slice(8)];
+        const v = s ? s.status() : 'idle';
+        return v === 'idle' ? '' : v;
+      }
+      if (id === 'dock') return dock.counts().running > 0 ? 'working' : '';
+      return '';
+    },
     /** True while something animates that deserves the higher frame rate. */
     busy() {
-      return director.busy() || (live.phase && live.phase !== 'idle') || tps > 1;
+      return director.busy() || dock.busy() || fx.busy() || (live.phase && live.phase !== 'idle') || tps > 1;
     },
-    update(dt, t) {
+    /** Subagent dock: { running, done, failed, stopped, overflow, wf, last } (tooltip). */
+    dockInfo: () => dock.counts(),
+    update(dt, t, camera) {
       tps = damp(tps, live.tps || 0, 6, dt);
       readoutT += dt;
       if (readoutT >= 0.5) {
@@ -227,7 +296,9 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
         readout();
       }
       const totals = state ? state.totals : { miss: 0, hit: 0, output: 0, reasoning: 0, cost: 0 };
-      const phase = live.phase && live.phase !== 'idle' ? live.phase : state ? state.phase : 'idle';
+      // The live stream wins; a session that is known to have stopped shows idle even when
+      // its log ended mid-turn.
+      const phase = live.phase && live.phase !== 'idle' ? live.phase : live.running === false ? 'idle' : state ? state.phase : 'idle';
       const flow = tps > 0.5 ? clamp(0.2 + tps / 90, 0, 1) : 0;
       activity = damp(activity, activityTarget(phase), 1.6, dt);
       stageInfo.activity = activity;
@@ -246,8 +317,12 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
       errorPulse = false;
       director.update(dt, t);
       fx.update(dt);
+      dock.update(dt, t, camera);
+      if (camera) stations.face(camera);
+      living.update(dt, t);
       updateChannels(dt, flow, phase);
       screenInfo.state = state;
+      screenInfo.phase = phase;
       screenInfo.tps = tps;
       screenInfo.peak = peak;
       screens.update(dt, t, screenInfo);
@@ -275,6 +350,8 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
     dispose() {
       director.dispose();
       stocker.dispose();
+      dock.dispose();
+      living.dispose();
       stage.dispose();
       disposeTree(scene);
       wafers.dispose();

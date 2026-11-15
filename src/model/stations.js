@@ -33,6 +33,8 @@ export const MACHINE_INFO = {
   loadport: { zh: '装载端口', en: 'Load port', code: 'LP-1' },
   stocker: { zh: '成品库', en: 'Product stocker', code: 'STK-1' },
   gantry: { zh: '天车', en: 'Gantry crane', code: 'OHT-1' },
+  dock: { zh: '子智能体坞站', en: 'Subagent dock', code: 'SA-1' },
+  living: { zh: '生活区', en: 'Living quarters', code: 'LV-1' },
 };
 
 /** Kinds whose successful calls count as produced output. */

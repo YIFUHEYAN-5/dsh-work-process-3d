@@ -121,10 +121,16 @@ test('labels and hover targets match the naming table', async () => {
   const world = buildWorld(null, 'medium', { environment: false, demo: true });
   const stations = STATION_ORDER.map((k) => `station:${k}`);
   const anchors = new Set(world.labelAnchors.map((a) => a.id));
-  for (const id of ['tank', 'engine', 'robot', 'loadport', 'stocker', ...stations]) assert.ok(anchors.has(id), `label anchor ${id}`);
+  for (const id of ['tank', 'engine', 'robot', 'loadport', 'stocker', 'living', ...stations]) assert.ok(anchors.has(id), `label anchor ${id}`);
+  const { DICTS: LOCALE } = await import('../src/client/locale.js');
+  // Screens are named by the locale (screen.flow / screen.main / screen.cost), the rest by the naming table.
   const named = new Set([...Object.keys(MACHINE_INFO), ...stations]);
   for (const o of world.hoverTargets()) {
     const id = String(o.userData.hoverId);
+    if (id.startsWith('screen:')) {
+      for (const lang of ['zh', 'en']) assert.ok(LOCALE[lang]['screen.' + id.slice(7)], `${id} has a ${lang} name`);
+      continue;
+    }
     assert.ok(named.has(id) || id.startsWith('foup:'), `hover id ${id} has a name`);
   }
   world.dispose();
@@ -136,7 +142,11 @@ test('machines stand on the floating islands inside the atrium', async () => {
   const world = buildWorld(null, 'medium', { environment: false });
   world.update(1 / 60, 0);
   world.scene.updateMatrixWorld(true);
-  for (const a of world.labelAnchors) assert.ok(sdIslands(a.anchor.x, a.anchor.z) < 0, `${a.id} is above an island`);
+  // Machine labels hang over the islands; the living quarters stand on the outer floor behind the media wall.
+  for (const a of world.labelAnchors) {
+    if (a.id === 'living') assert.ok(sdWell(a.anchor.x, a.anchor.z) > 0, 'living is outside the well');
+    else assert.ok(sdIslands(a.anchor.x, a.anchor.z) < 0, `${a.id} is above an island`);
+  }
   // Everything that stands on the floor must stand on an island (5 cm tolerance).
   const box = new THREE.Box3();
   const machines = new Set(['fuel', 'engine', 'cell', 'stations', 'stocker']);
@@ -325,6 +335,40 @@ test('first sync places history without animation and survives a reset', () => {
   // A shorter history (new session) clears the floor.
   world.setState(initialState());
   for (let k = 0; k < 30; k++) world.update(1 / 30, k / 30);
+  assert.equal(world.stats().inflight, 0);
+  assertFinite(world.scene);
+  world.dispose();
+});
+
+test('another session or data source starts from an empty line', () => {
+  const demo = createDemo({});
+  const world = buildWorld(null, 'medium', { environment: false, demo: true });
+  const batches = () => world.hoverTargets().filter((o) => String(o.userData.hoverId).startsWith('foup:')).length;
+  world.setState(reduceAll(initialState(), demo.prefill(2)));
+  for (let k = 0; k < 150; k++) world.update(1 / 30, k / 30);
+  assert.ok(batches() >= 2, 'the demo history is on the stocker');
+  assert.equal(world.isDemo(), true);
+  world.setDemo(false);
+  assert.equal(world.isDemo(), false);
+
+  world.resetState();
+  for (let k = 0; k < 10; k++) world.update(1 / 30, 5 + k / 30);
+  assert.equal(batches(), 0, 'no batch of the previous session is left');
+  assert.equal(world.stats().inflight, 0);
+  assert.equal(world.stats().dock, null, 'the load port waits for the next turn');
+
+  // A live session with one finished turn lays out its own history without animation.
+  const T0 = Date.UTC(2026, 10, 15, 12, 0, 0);
+  const live = reduceAll(initialState(), [
+    { type: 'turn/start', seq: 1, time: T0, data: { turn: 1 } },
+    { type: 'tool/call', seq: 2, time: T0 + 10, data: { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: '{"file_path":"a.js"}' } },
+    { type: 'tool/result', seq: 3, time: T0 + 20, data: { turn: 1, step: 1, message: { toolCallId: 'c1' } } },
+    { type: 'turn/end', seq: 4, time: T0 + 30, data: { turn: 1, reason: { kind: 'completed' } } },
+  ]);
+  world.setLive({ running: false, balanceStatus: 'signed-out' });
+  world.setState(live);
+  for (let k = 0; k < 30; k++) world.update(1 / 30, 6 + k / 30);
+  assert.equal(batches(), 1);
   assert.equal(world.stats().inflight, 0);
   assertFinite(world.scene);
   world.dispose();

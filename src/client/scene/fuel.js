@@ -28,6 +28,7 @@ function flowTexture() {
 export function buildFuel(M) {
   const root = group('fuel');
   const tank = group('tank', [TANK_POS.x, 0, TANK_POS.z]);
+  tank.userData.solid = 'tank'; // the camera keeps out (camspace.js)
   root.add(tank);
   root.add(blobShadow(M, 2.6, 2.6, [TANK_POS.x, 0, TANK_POS.z], 0.6));
 
@@ -92,6 +93,7 @@ export function buildFuel(M) {
 
   // HMI pedestal with the balance readout.
   const hmi = group('fuel-hmi', [TANK_POS.x + 0.95, 0, TANK_POS.z + 1.3], [0, -0.35, 0]);
+  hmi.userData.solid = 'fuel-hmi';
   const hk = new Kit();
   hk.add('graphite', tf(rbox(0.36, 0.04, 0.3, 0.015), [0, 0.02, 0]));
   hk.add('alu', tf(cyl(0.035, 0.035, 0.95, 16), [0, 0.5, 0]));

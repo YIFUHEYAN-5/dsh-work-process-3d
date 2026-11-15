@@ -23,5 +23,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
       - run: pnpm build
-      - name: dist/client.js matches the sources
-        run: git diff --exit-code -- dist/client.js
+      - name: dist/ matches the sources
+        run: |
+          git status --porcelain -- dist/
+          git diff --exit-code -- dist/
+          test -z "$(git status --porcelain -- dist/)"

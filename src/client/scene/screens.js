@@ -427,10 +427,11 @@ const DRAW = { flow: drawFlow, main: drawMain, cost: drawCost };
 // ── Scene objects ───────────────────────────────────────────────
 
 /**
- * buildScreens(M, glow, { demo }) → { root, update(dt, t, info), dispose() }.
+ * buildScreens(M, glow, { demo }) → { root, update(dt, t, info), hover, setDetail(id, scale), setDemo(on), reset() }.
  * info: { state, live, tps, peak }.
  */
-export function buildScreens(M, glow, { demo = false } = {}) {
+export function buildScreens(M, glow, { demo: demoInit = false } = {}) {
+  let demo = !!demoInit;
   const root = new THREE.Group();
   root.name = 'screens';
   const screens = [];
@@ -451,8 +452,15 @@ export function buildScreens(M, glow, { demo = false } = {}) {
     bezel.name = `screen-bezel-${def.id}`;
     bezel.layers.set(NO_REFLECT_LAYER);
     root.add(bezel);
-    screens.push({ def, tex, sig: '', draw: DRAW[def.id], panel });
+    // Clickable for the close-up view; the hover bracket would float in front of the curve.
+    panel.userData.noHighlight = true;
+    screens.push({ def, tex, sig: '', draw: DRAW[def.id], panel, scale: 1 });
   }
+  let lastData = null;
+  const paint = (S, d) => S.tex.redraw((g) => {
+    if (S.scale !== 1) g.scale(S.scale, S.scale);
+    S.draw(g, S.def.px[0], S.def.px[1], d);
+  });
 
   // History buffers for the charts.
   const tpsHist = new Array(TPS_SAMPLES).fill(0);
@@ -467,7 +475,7 @@ export function buildScreens(M, glow, { demo = false } = {}) {
   function data(info) {
     const s = info.state;
     const live = info.live || {};
-    const phase = live.phase && live.phase !== 'idle' ? live.phase : s ? s.phase : 'idle';
+    const phase = info.phase || (live.phase && live.phase !== 'idle' ? live.phase : s ? s.phase : 'idle');
     const T = s ? s.totals : { miss: 0, hit: 0, write: 0, output: 0, reasoning: 0, requests: 0, cost: 0, costPeak: 0, costOffPeak: 0, savings: 0 };
     const m = s ? metrics(s) : { hitRate: 0, toolSuccess: 1, contextRatio: 0 };
     const turns = s ? s.turns : [];
@@ -514,7 +522,7 @@ export function buildScreens(M, glow, { demo = false } = {}) {
     }
     if (id === 'main') {
       const last = d.recent[d.recent.length - 1];
-      return `${d.model}|${d.effort}|${d.phase}|${d.turn}|${d.ok}|${d.rework}|${d.calls}|${d.running}|${d.files}|${d.added}|${d.removed}|${d.requests}|${d.recent.length}|${last ? `${last.id}:${last.status}` : ''}|${Math.round(d.toolSuccess * 1000)}`;
+      return `${d.demo}|${d.model}|${d.effort}|${d.phase}|${d.turn}|${d.ok}|${d.rework}|${d.calls}|${d.running}|${d.files}|${d.added}|${d.removed}|${d.requests}|${d.recent.length}|${last ? `${last.id}:${last.status}` : ''}|${Math.round(d.toolSuccess * 1000)}`;
     }
     return `${d.cost.toFixed(5)}|${d.costPeak.toFixed(5)}|${d.savings.toFixed(5)}|${d.ctx}|${d.window}|${d.peak}|${d.requests}|${costHist[COST_SAMPLES - 1].toFixed(5)}|${Math.round(d.hitRate * 1000)}`;
   }
@@ -547,12 +555,44 @@ export function buildScreens(M, glow, { demo = false } = {}) {
       if (redrawClock < 0.5) return;
       redrawClock = 0;
       const d = data(info);
+      lastData = d;
       for (const S of screens) {
         const sig = signature(S.def.id, d);
         if (sig === S.sig) continue;
         S.sig = sig;
-        S.tex.redraw((g, w, h) => S.draw(g, w, h, d));
+        paint(S, d);
       }
+    },
+    /** Click targets for the close-up view: [{ id: 'screen:<id>', object }]. */
+    hover: screens.map((S) => ({ id: `screen:${S.def.id}`, object: S.panel })),
+    /**
+     * Draw one screen at `scale`× resolution (for the close-up); every other screen goes back
+     * to 1×. The canvas is replaced and repainted right away so the screen never blanks.
+     */
+    setDetail(id, scale = 2) {
+      for (const S of screens) {
+        const want = S.def.id === id ? scale : 1;
+        if (want === S.scale) continue;
+        const [cw, ch] = S.def.px;
+        const old = S.tex;
+        S.scale = want;
+        S.tex = canvasTexture(cw * want, ch * want, (g) => {
+          g.scale(want, want);
+          base(g, cw, ch);
+        }, { anisotropy: 8 });
+        S.panel.material.map = S.tex.tex;
+        S.sig = '';
+        if (lastData) {
+          S.sig = signature(S.def.id, lastData);
+          paint(S, lastData);
+        }
+        old.tex.dispose();
+      }
+    },
+    /** Show or drop the demo badge. */
+    setDemo(on) {
+      demo = !!on;
+      for (const S of screens) S.sig = '';
     },
     /** Clears the chart history (a new session was loaded). */
     reset() {
