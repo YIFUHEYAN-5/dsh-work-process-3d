@@ -9,7 +9,7 @@ DeepSeek 的拟人化形象「蓝色大肥鱼」（女仆装鲸鱼娘），准�
 - [x] Tripo 输入图：在设计图基础上改成微笑、A 字姿势、手掌张开，去掉尾巴和呆毛圈（`assets/source/tripo_input.png`）
 - [x] 身体：Tripo v3.1 图生模型（`assets/whale_body.glb`）
 - [x] 尾巴和呆毛：程序生成（`src/tail.js`、`src/ahoge.js`）
-- [x] 着色：赛璐璐两色调 + 边缘光 + 描边（`src/toon.js`）
+- [x] 着色：赛璐璐两色调 + 边缘光 + 描边（`src/toon.js`）；脸上不画硬阴影，描边按头发、皮肤和衣服分区（`tools/rig/toon_zones.py`）
 - [x] 绑骨和 10 个预设动作：Tripo 自动绑骨 v1.0，蒙皮权重重新修过（`assets/whale_rigged.glb`）
 - [x] 离线预览：打包成一个双击就能打开的 HTML 文件（`viewer/`）
 - [x] 手：从手腕开始按肤色划出整只手，整只手跟着手骨动，不再被裙子扯开（`tools/rig/check_hands.py` 检查）
@@ -28,12 +28,12 @@ DeepSeek 的拟人化形象「蓝色大肥鱼」（女仆装鲸鱼娘），准�
 | `preview/turntable.html` | 多视角预览页，可以按时间点摆出动作，参数写在文件开头的注释里 |
 | `preview/cdp.mjs` | 用无头 Edge 渲染预览页并截图 |
 | `viewer/` | 离线预览：`build.mjs` 打包，`main.js` 页面逻辑，`issues.js` 问题定位列表，`viewer.html` 页面模板 |
-| `assets/whale_rigged.glb` | 绑骨模型：41 根骨骼、10 个动作、修过的蒙皮权重，75,666 个三角面，2048² 底色贴图，4.4 MB |
+| `assets/whale_rigged.glb` | 绑骨模型：41 根骨骼、10 个动作、修过的蒙皮权重，75,666 个三角面，2048² 底色贴图，带着色分区，4.6 MB |
 | `assets/whale_body.glb` | Tripo 生成的身体（未绑骨）：75,753 个三角面，4096² 贴图 |
 | `assets/landmarks.json` | 在归一化坐标里测得的头顶位置和头发颜色 |
 | `assets/source/tripo_input.png` | 生成身体用的输入图 |
 | `tools/` | 读取 GLB 和测量用的 Python 小工具（需要 numpy、Pillow） |
-| `tools/rig/` | 修蒙皮权重（`fix_weights.py`）、组装绑骨模型（`build_rigged.py`）、检查手（`check_hands.py`）、评估变形（`collect_mats.mjs`、`eval_skin.py`） |
+| `tools/rig/` | 修蒙皮权重（`fix_weights.py`）、组装绑骨模型（`build_rigged.py`）、写入着色分区（`toon_zones.py`）、检查手（`check_hands.py`）、评估变形（`collect_mats.mjs`、`eval_skin.py`） |
 | `tripo/client.mjs` | Tripo v3 API 客户端 |
 | `tripo/rig.mjs`、`tripo/anims.mjs` | 调用 Tripo 绑骨和动作重定向，结果下载到 `tripo/raw/` |
 | `docs/` | 渲染图和动作预览动图 |
@@ -112,6 +112,25 @@ Tripo v1.0 自动绑骨的权重在大动作里变形严重。A 字姿势里手�
 
 ![手的特写：修复前后](docs/hands.webp)
 
+## 脸部着色
+
+Tripo 做出的脸表面凹凸不平，脸部法线和拟合球面平均相差 59°。原来的硬明暗交界线和描边把这些起伏画成了灰斑和黑线。`tools/rig/toon_zones.py` 在模型里写入顶点属性 `_TOON`，`src/toon.js` 按它分区着色：
+
+- 脸：从鼻子附近出发，在头部的肤色区域里连通生长，不含头发、脖子和下巴下面，共 1,229 个顶点，全部跟着 `Head` 骨骼。脸部法线向拟合球面平滑，和球面的平均偏差从 59.2° 降到 25.1°。
+- 脸上一直用亮面颜色，不画明暗交界线。脖子等其他皮肤保留阴影，阴影色改成偏暖的 `TOON.skinShadow`。
+- 描边按区域换颜色和粗细：衣服 `#141a3a`；头发 `#1e265c`，宽度是其他地方的 0.6 倍；皮肤 `#603834`。脸上只在转向侧面的轮廓处画描边。
+
+待机动作第 2 秒、700×700 渲染里脸部像素的统计（阴影指卡通着色比原贴图暗 10% 以上，深色线条指暗 50% 以上）：
+
+| 视角 | 有阴影的像素 | 深色线条的像素 |
+| --- | --- | --- |
+| 正面 | 22.1% → 6.9% | 11.25% → 3.66% |
+| 斜侧 | 20.4% → 7.9% | 11.63% → 4.95% |
+
+![脸部着色修改前后](docs/face_shading.webp)
+
+贴图分辨率：把 `build_rigged.py` 的第 4 个参数从 2048 改成 4096，眼睛区域的清晰度（拉普拉斯方差）从 96 提高到 143，模型从 4.6 MB 变成 5.7 MB。现在仍用 2048²，因为计划里的脸部贴片会盖住贴图上的眼睛和嘴。
+
 ## 预览
 
 ### 离线预览
@@ -122,12 +141,12 @@ Tripo v1.0 自动绑骨的权重在大动作里变形严重。A 字姿势里手�
 node whale/viewer/build.mjs
 ```
 
-输出 `whale/viewer/out/whale_viewer.html`（约 8.3 MB，不提交）。如果有 `whale/tripo/raw/anim_test_idle_greet.glb`（`tripo/rig.mjs` 下载的文件，也可以用 `--tripo <文件>` 指定），文件里会带上 Tripo 原始权重，页面上可以和修复后的权重来回切换；没有这个文件时只有修复后的权重，文件约 6.6 MB。
+输出 `whale/viewer/out/whale_viewer.html`（约 8.6 MB，不提交）。如果有 `whale/tripo/raw/anim_test_idle_greet.glb`（`tripo/rig.mjs` 下载的文件，也可以用 `--tripo <文件>` 指定），文件里会带上 Tripo 原始权重，页面上可以和修复后的权重来回切换；没有这个文件时只有修复后的权重，文件约 6.8 MB。
 
 页面上可以：
 
 - 播放 10 个动作或停在绑定姿势，拖时间轴，用 ←/→ 逐帧，慢放到 0.25×。
-- 切换卡通着色、原贴图和变形热图。热图的颜色和左上角的三角形计数与上面「蒙皮权重」一节用同一个标准，同一帧的数字和表里一致，个别帧因为浮点误差会差几个三角形。
+- 切换卡通着色、原贴图、变形热图和着色分区。热图的颜色和左上角的三角形计数与上面「蒙皮权重」一节用同一个标准，同一帧的数字和表里一致，个别帧因为浮点误差会差几个三角形。
 - 切换修复后和 Tripo 原始权重，开关描边、尾巴、呆毛和骨骼，切换视角（「左手」「右手」两个特写会跟着手移动）。
 - 点「问题定位」里的条目，直接跳到能看到这个问题的动作、时间和视角。
 
@@ -156,7 +175,8 @@ node whale/preview/cdp.mjs greet.png "glb=../assets/whale_rigged.glb&tail=1&mode
 node whale/tripo/rig.mjs --yes
 node whale/tripo/anims.mjs --yes
 python whale/tools/rig/fix_weights.py whale/tripo/raw/anim_test_idle_greet.glb whale/preview/out/weights.glb
-python whale/tools/rig/build_rigged.py whale/tripo/raw/anim_test_idle_greet.glb whale/preview/out/weights.glb whale/assets/whale_rigged.glb 2048 whale/tripo/raw/anim_anim2.glb whale/tripo/raw/anim_anim3.glb
+python whale/tools/rig/build_rigged.py whale/tripo/raw/anim_test_idle_greet.glb whale/preview/out/weights.glb whale/preview/out/rigged.glb 2048 whale/tripo/raw/anim_anim2.glb whale/tripo/raw/anim_anim3.glb
+python whale/tools/rig/toon_zones.py whale/preview/out/rigged.glb whale/assets/whale_rigged.glb
 python whale/tools/rig/check_hands.py whale/tripo/raw/anim_test_idle_greet.glb whale/assets/whale_rigged.glb
 node whale/tools/rig/collect_mats.mjs whale/preview/out/mats.json
 python whale/tools/rig/eval_skin.py whale/tripo/raw/anim_test_idle_greet.glb whale/assets/whale_rigged.glb whale/preview/out/mats.json
@@ -164,6 +184,7 @@ python whale/tools/rig/eval_skin.py whale/tripo/raw/anim_test_idle_greet.glb wha
 
 - `rig.mjs` 绑骨并做 `idle`、`greet_01`（45 积分），`anims.mjs` 做其余 8 个动作（80 积分）。任务 ID 记在 `tripo/rig_state.json`（不提交），中断后重新运行会继续等原来的任务。状态文件里没有的任务，只有加了 `--yes` 才会新建，因为新建任务要扣积分。绑骨的输入是下面的身体任务，需要用同一个 Tripo 账号。
 - `fix_weights.py` 不带额外参数时，用的就是上表那组参数。
+- `toon_zones.py` 写入「脸部着色」一节的分区并平滑脸部法线，输入文件已经带分区时直接退出。
 - `check_hands.py` 按「手」一节的四条检查两只手，有一条不通过就以退出码 1 结束。
 - 最后两步在无头 Edge 里每 0.25 s 采样一次每个动作的蒙皮矩阵，再逐个动作对比 Tripo 原始权重和新模型，结果打印出来并写到 `whale/preview/out/mats_eval.json`。
 

@@ -81,6 +81,44 @@ test('whale_rigged.glb: each hand is one piece on its own arm, with no triangle 
   }
 });
 
+test('whale_rigged.glb: the baked toon zones put the face on the front of the head, and mark the hair', () => {
+  const { json, read } = readGlb(new URL('../whale/assets/whale_rigged.glb', import.meta.url));
+  const prim = json.meshes[0].primitives[0];
+  assert.ok(prim.attributes._TOON !== undefined, 'run whale/tools/rig/toon_zones.py on the build_rigged.py output');
+  const Z = read(prim.attributes._TOON), P = read(prim.attributes.POSITION), J = read(prim.attributes.JOINTS_0), Wt = read(prim.attributes.WEIGHTS_0);
+  assert.equal(Z.a.componentType, 5121); assert.equal(Z.a.normalized, true); assert.equal(Z.a.type, 'VEC4');
+  const head = json.skins[0].joints.findIndex(j => json.nodes[j].name === 'Head');
+  let face = 0, outside = 0, offHead = 0, hair = 0;
+  for (let v = 0; v < Z.a.count; v++) {
+    if (Z.out[4 * v + 2] > 127) hair++;
+    if (Z.out[4 * v] <= 127) continue;
+    face++;
+    const x = P.out[3 * v], y = P.out[3 * v + 1];
+    if (!(x > 0.03 && y > 0.74 && y < 0.92)) outside++; // front of the head in mesh units (the Tripo body faces +x, 0.98 tall)
+    let best = -1, bj = -1;
+    for (let k = 0; k < 4; k++) if (Wt.out[4 * v + k] > best) { best = Wt.out[4 * v + k]; bj = J.out[4 * v + k]; }
+    if (bj !== head) offHead++;
+  }
+  assert.ok(face > 500 && face < 3000, 'face vertices: ' + face);
+  assert.equal(outside, 0, 'face vertices outside the front of the head');
+  assert.equal(offHead, 0, 'face vertices that do not follow the Head bone');
+  assert.ok(hair > 8000, 'hair vertices: ' + hair);
+});
+
+test('toon.js: the zone rules still patch the three.js toon and basic shaders', async () => {
+  const { toonMaterial, outlineMaterial } = await import('../whale/src/toon.js');
+  const shader = name => ({ uniforms: {}, vertexShader: THREE.ShaderLib[name].vertexShader, fragmentShader: THREE.ShaderLib[name].fragmentShader });
+  const s = shader('toon');
+  toonMaterial({ zones: true }).onBeforeCompile(s);
+  assert.match(s.vertexShader, /vToon = toon;/);
+  assert.match(s.fragmentShader, /lit = mix\( lit, 1\.0, vToon\.x \);/);
+  const o = shader('basic');
+  outlineMaterial({ zones: true }).onBeforeCompile(o);
+  assert.match(o.vertexShader, /owK = mix\( owK,/, 'face outline only at the contour');
+  assert.match(o.vertexShader, /vLine = toon\.zw;/);
+  assert.match(o.fragmentShader, /uLineSkin, vLine\.y/, 'hair and skin line colours');
+});
+
 function tailOnPelvis() {
   const scene = new THREE.Scene(), pelvis = new THREE.Bone();
   pelvis.position.set(0, 0.7, -0.02);
