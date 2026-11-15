@@ -1,0 +1,9 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.webp binary
+
+# Build output, committed so the plugin can be installed straight from GitHub.
+# Hidden from diffs; CI checks that it matches the sources.
+dist/client.js -diff linguist-generated=true
+pnpm-lock.yaml linguist-generated=true

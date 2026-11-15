@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH work process 3D live view",
+    "description": "Adds a \"3D process\" tab to the view tabs of every conversation. It shows the agent's work as a realistic 3D precision factory: a fuel tank for your DeepSeek balance, an engine whose rotor follows the token generation rate, a console with the context gauge and token counters, ten tool stations that process a wafer for each tool call (file reads, edits, terminal, web, subagents, compression and more), and a stocker that stores each conversation turn as a batch. Drag to orbit and scroll to zoom; the top-right toolbar has the views Overview, Fuel, Engine, Stations and Products plus Follow, Labels, Panels, Quality and Fullscreen. Hover a machine for details and click it to fly there. This is the M0 style prototype: the scene runs on a built-in demo session, not on your real session yet, and says so on screen. It needs WebGL 2 with hardware acceleration; Quality starts from your GPU and drops automatically when the frame rate is low."
+  }
+}

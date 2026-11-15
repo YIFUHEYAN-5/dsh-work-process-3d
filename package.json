@@ -1,0 +1,71 @@
+{
+  "name": "dsh-work-process-3d",
+  "version": "0.1.0",
+  "description": "dsh工作进程3D实时可视化：把 DeepSeek Harness 的 token 余量、消耗、工具调用与产出渲染成一台写实的精密机器。",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "three.js",
+    "visualization",
+    "token"
+  ],
+  "license": "MIT",
+  "author": "YIFUHEYAN-5",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YIFUHEYAN-5/dsh-work-process-3d.git"
+  },
+  "homepage": "https://github.com/YIFUHEYAN-5/dsh-work-process-3d#readme",
+  "bugs": {
+    "url": "https://github.com/YIFUHEYAN-5/dsh-work-process-3d/issues"
+  },
+  "type": "module",
+  "icon": "./icon.svg",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./dist/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "dist/client.js",
+    "src/model",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "README.en.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "dsh": ">=0.2.0-rc.1"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "three": "0.187.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
