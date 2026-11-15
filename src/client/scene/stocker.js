@@ -37,6 +37,9 @@ const STATUS = {
   rework: { zh: '返工', en: 'REWORK', color: '#d63b3b' },
 };
 
+/** Files a turn touched: the exact count, even when the listed paths are capped. */
+export const fileCountOf = (info) => (!info ? 0 : typeof info.fileCount === 'number' ? info.fileCount : info.files ? info.files.length : 0);
+
 function drawLabel(g, w, h, f) {
   const info = f.info;
   const st = info ? STATUS[info.status] || STATUS.running : null;
@@ -59,8 +62,7 @@ function drawLabel(g, w, h, f) {
   g.font = `600 19px ${FONT_MONO}`;
   g.fillStyle = '#3a3d44';
   const calls = info ? info.calls || 0 : 0;
-  const files = info && info.files ? info.files.length : 0;
-  g.fillText(`CALLS ${calls} · FILES ${files}`, 30, h * 0.64);
+  g.fillText(`CALLS ${calls} · FILES ${fileCountOf(info)}`, 30, h * 0.64);
   // Barcode strip along the bottom edge.
   g.fillStyle = '#15171b';
   let x = 30;
@@ -269,7 +271,7 @@ export function buildStocker(M, wafers) {
     return f;
   }
   function refreshLabel(f) {
-    const key = `${f.no}|${f.info ? `${f.info.status}|${f.info.calls}|${(f.info.files || []).length}` : '-'}|${f.count}`;
+    const key = `${f.no}|${f.info ? `${f.info.status}|${f.info.calls}|${fileCountOf(f.info)}` : '-'}|${f.count}`;
     if (key === f.labelKey) return;
     f.labelKey = key;
     f.proxy.userData.hoverId = f.no ? `foup:${f.no}` : 'loadport';
@@ -460,6 +462,19 @@ export function buildStocker(M, wafers) {
       refreshLabel(f);
     },
     busy: () => !!program || shipQueue.length > 0,
+    /** Remove every FOUP and park the crane (another session follows). */
+    clear() {
+      for (const f of [...foups]) removeFoup(f);
+      shipQueue.length = 0;
+      program = null;
+      cr.carry = null;
+      cr.grip = 0;
+      cr.hook = PARK_HOOK;
+      cr.x = LOAD_PORT.x;
+      cr.z = LOAD_PORT.z;
+      gripLed.emissiveIntensity = 0.3;
+      applyCrane();
+    },
     update(dt) {
       // Crane program.
       if (!program && shipQueue.length) {

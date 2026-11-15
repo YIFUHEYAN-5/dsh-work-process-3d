@@ -158,7 +158,7 @@ function createGpuTimer(gl) {
  */
 export function createFactoryScene(container, opts = {}) {
   const { onHover, onSelect, onPerf, onError, onFocus, onActive, onReady, onMode, onScreen } = opts;
-  const demo = !!opts.demo;
+  let demo = !!opts.demo;
   const reduceMotion = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
     && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -1295,6 +1295,16 @@ export function createFactoryScene(container, opts = {}) {
     setLive(live) {
       lastLive = { ...(lastLive || {}), ...live };
       if (world) world.setLive(live);
+    },
+    /** Mark the shown data as fictional (demo) or real. */
+    setDemo(on) {
+      demo = !!on;
+      if (world) world.setDemo(demo);
+    },
+    /** Drop everything the previous session or data source left in the scene. */
+    resetState() {
+      lastState = null;
+      if (world) world.resetState();
     },
     getQuality: () => quality,
     /** The tier this GPU gets when the user has not chosen one. */

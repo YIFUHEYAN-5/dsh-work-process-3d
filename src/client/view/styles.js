@@ -22,6 +22,9 @@ export const CSS = `
 .dwp3d-warn{color:#ff9a9a;max-width:520px;overflow-wrap:anywhere;user-select:text}
 .dwp3d-chip{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:10px;font-size:11px;background:rgba(255,255,255,.07);color:#c9d2e3;white-space:nowrap}
 .dwp3d-chip.demo{background:rgba(255,176,32,.18);color:#ffc65c;font-weight:600}
+.dwp3d-chip.live{background:rgba(52,209,122,.16);color:#5fe39a;font-weight:600}
+.dwp3d-link{background:none;border:0;padding:0;font:inherit;color:#8fb0ff;text-decoration:underline;cursor:pointer}
+.dwp3d-link:focus-visible{outline:2px solid #4d6bfe;outline-offset:2px;border-radius:2px}
 .dwp3d-dot{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 6px currentColor;flex:none}
 .dwp3d-tools{display:flex;align-items:center;gap:6px;padding:4px;flex-wrap:wrap;justify-content:flex-end}
 .dwp3d-right{display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:100%}

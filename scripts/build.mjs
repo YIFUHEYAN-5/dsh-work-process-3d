@@ -1,6 +1,9 @@
-// Bundles the Client half into dist/client.js in the DSH Client module format:
-//   window.__ModuleLoader__.load({ id: <package name>, factory(require) { ... } })
-// React comes from the host module table through `require`; three.js is bundled.
+// Bundles both halves:
+//  - dist/client.js in the DSH Client module format
+//      window.__ModuleLoader__.load({ id: <package name>, factory(require) { ... } })
+//    React comes from the host module table through `require`; three.js is bundled.
+//  - dist/host.js, an ES module for the Host with zod bundled, so the plugin needs no
+//    runtime dependencies.
 import { build } from 'esbuild';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -56,3 +59,25 @@ const kb = (n) => `${(n / 1024).toFixed(0)} KiB`;
 const inputs = Object.entries(result.metafile.inputs);
 const threeBytes = inputs.filter(([f]) => f.includes('node_modules')).reduce((a, [, v]) => a + v.bytes, 0);
 console.log(`dist/client.js ${kb(Buffer.byteLength(code))} (${inputs.length} inputs, ${kb(threeBytes)} of dependency source before minify)`);
+
+// ── Host bundle ─────────────────────────────────────────────────
+const host = await build({
+  absWorkingDir: root,
+  entryPoints: ['src/host/index.js'],
+  bundle: true,
+  write: false,
+  format: 'esm',
+  platform: 'node',
+  target: ['node20'],
+  minify: !dev,
+  keepNames: true,
+  sourcemap: false,
+  legalComments: 'eof',
+  charset: 'utf8',
+  logLevel: 'warning',
+  metafile: true,
+});
+const hostCode = `/*! ${pkg.name} ${pkg.version} host | MIT | bundles zod (MIT, Copyright Colin McDonnell) */\n${host.outputFiles[0].text}`;
+await writeFile(path.join(root, 'dist', 'host.js'), hostCode, 'utf8');
+const hostInputs = Object.keys(host.metafile.inputs).length;
+console.log(`dist/host.js ${kb(Buffer.byteLength(hostCode))} (${hostInputs} inputs)`);

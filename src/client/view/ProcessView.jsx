@@ -6,12 +6,20 @@ import { initialState, reduceAll, metrics } from '../../model/reducer.js';
 import { STATION_INFO, STATION_ORDER, MACHINE_INFO, basename } from '../../model/stations.js';
 import { priceFor, isPeak, affordableTokens } from '../../model/pricing.js';
 import { formatTokens, formatMoney, formatPct, formatDuration, fill } from '../format.js';
+import { createStreamMeter, withContext, fetchBalance } from '../live.js';
 import { CSS } from './styles.js';
 
 const { useEffect, useRef, useState, useReducer, useCallback } = React;
 
-// M0: the built-in demo session drives the view, and the view says so on screen.
-const DEMO = true;
+// Projection published by this plugin's Host part (src/host/projection.js).
+const PROJECTION_KEY = 'workProcess3d';
+// 'live' (the session's own data, the default) or 'demo' (the built-in fictional session).
+const SOURCE_KEY = 'dwp3d.source';
+// Live data that has not arrived after this long gets an explanation and a way to the demo.
+const LIVE_WAIT_MS = 5000;
+const BALANCE_REFRESH_MS = 120_000;
+const BALANCE_AFTER_TURN_MS = 4000;
+const STREAM_TICK_MS = 250;
 // Holds only a tier the user picked; when absent the GPU-based default applies.
 const QUALITY_KEY = 'dwp3d.quality';
 const HINT_KEY = 'dwp3d.hint';
@@ -76,6 +84,58 @@ function storedLook() {
 function storedBrightness() {
   const v = Number(readStored(BRIGHT_KEY));
   return Number.isFinite(v) && v >= BRIGHTNESS.min && v <= BRIGHTNESS.max ? v : BRIGHTNESS.initial;
+}
+
+function storedSource() {
+  return readStored(SOURCE_KEY) === 'demo' ? 'demo' : 'live';
+}
+
+/*
+ * Live data probes. Each one calls a single DSH slot hook and hands the value to the view; they
+ * render nothing. Separate components keep every hook call unconditional, and the boundary
+ * turns a hook that throws (an older or newer DSH) into "no live data" instead of a broken view.
+ */
+class ProbeBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(err) {
+    if (this.props.onError) this.props.onError(err);
+  }
+
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
+function ProjectionProbe({ use, name, onValue }) {
+  const value = use(name);
+  useEffect(() => onValue(value), [value, onValue]);
+  return null;
+}
+
+// Running and blank flags as one primitive, so the hook re-renders only when either changes.
+const sessionFlags = (s) => (s ? `${s.running ? 1 : 0}${s.blank ? 1 : 0}` : '');
+
+function SessionProbe({ use, onValue }) {
+  const flags = use(sessionFlags);
+  useEffect(() => onValue(flags), [flags, onValue]);
+  return null;
+}
+
+// The assistant message being streamed in the chat (null between messages).
+const chatPartial = (s) => (s && s.legacy ? s.legacy.partial || null : null);
+
+function StreamProbe({ use, onValue }) {
+  const partial = use(chatPartial);
+  useEffect(() => onValue(partial), [partial, onValue]);
+  return null;
 }
 
 function fpsLabel(t, v) {
@@ -168,10 +228,21 @@ function labelSpec(lang) {
 
 const batchStatus = (turn) => (turn.status === 'running' ? 'running' : turn.status === 'ok' ? 'ok' : 'rework');
 
+const BALANCE_STATUS_KEYS = { loading: 'bal.loading', 'signed-out': 'bal.signedOut', failed: 'bal.failed', unavailable: 'bal.unavailable' };
+const nowMs = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
+
+/** The balance as money, or why there is none. */
+function balanceText(t, balance, currency, status) {
+  if (balance != null) return formatMoney(balance, currency);
+  return t(BALANCE_STATUS_KEYS[status] || 'bal.unavailable');
+}
+
 function batchRows(t, turn) {
-  const rows = [[t('status.' + batchStatus(turn)), t('hover.batchBody', { calls: turn.calls, errors: turn.errors, files: turn.files.length })]];
+  // The live view lists at most a few paths per turn; fileCount stays exact.
+  const files = typeof turn.fileCount === 'number' ? turn.fileCount : turn.files.length;
+  const rows = [[t('status.' + batchStatus(turn)), t('hover.batchBody', { calls: turn.calls, errors: turn.errors, files })]];
   for (const f of turn.files.slice(0, 6)) rows.push([basename(f.path), `+${f.added} −${f.removed}`]);
-  if (turn.files.length > 6) rows.push(['…', `+${turn.files.length - 6}`]);
+  if (files > 6) rows.push(['…', `+${files - 6}`]);
   const time = (turn.endedAt || Date.now()) - turn.startedAt;
   rows.push(['', t('hover.batchCost', { cost: formatMoney(turn.cost), time: formatDuration(time) })]);
   return rows;
@@ -184,7 +255,12 @@ function tipFor(id, d) {
   const perM = (v) => t('unit.perM', { price: formatMoney(v) });
   switch (id) {
     case 'tank': {
-      const rows = [[DEMO ? t('m.balanceDemo') : t('m.balance'), d.balance == null ? t('m.balanceNone') : formatMoney(d.balance, d.currency)]];
+      const rows = [[d.demo ? t('m.balanceDemo') : t('m.balance'), balanceText(t, d.balance, d.currency, live.balanceStatus)]];
+      if (!d.demo && d.balance != null && live.toppedUp != null) {
+        rows.push([t('m.toppedUp'), formatMoney(live.toppedUp, d.currency)]);
+        rows.push([t('m.granted'), formatMoney(live.granted || 0, d.currency)]);
+      }
+      if (!d.demo && d.balance != null && live.balanceSource === 'api-key') rows.push(['', t('m.balanceViaKey')]);
       if (price) {
         rows.push([t('price.peak'), `${perM(price.miss[1])} · ${perM(price.output[1])}`]);
         rows.push([t('price.off'), `${perM(price.miss[0])} · ${perM(price.output[0])}`]);
@@ -393,7 +469,8 @@ const canFullscreen = () =>
 
 /**
  * The "3D process" conversation view: a WebGL factory scene plus a glass HUD.
- * M0 drives it with the built-in demo session.
+ * It shows the session's live data from this plugin's Host projection, or the built-in demo
+ * session (fictional data, marked as such) when chosen or when live data cannot work.
  */
 export function ProcessView(props) {
   const { ctx } = props;
@@ -414,7 +491,7 @@ export function ProcessView(props) {
   const stageRef = useRef(null);
   const sceneRef = useRef(null);
   const modelRef = useRef(initialState());
-  const liveRef = useRef({ phase: 'idle', tps: 0, balance: null, currency: 'CNY' });
+  const liveRef = useRef({ phase: 'idle', tps: 0, balance: null, currency: 'CNY', balanceStatus: 'loading' });
   const pendingRef = useRef(0);
   const dirtyRef = useRef(false);
   const activeRef = useRef(true);
@@ -456,6 +533,30 @@ export function ProcessView(props) {
   const [renderWarn, setRenderWarn] = useState(null);
   const [toast, setToast] = useState(null);
 
+  // Data source. Live data comes from this plugin's Host projection; a DSH without the
+  // projection hook (or one whose hook fails) can only show the demo.
+  const useProjectionHook = typeof props.useProjection === 'function' ? props.useProjection : null;
+  const useSessionHook = typeof props.useSession === 'function' ? props.useSession : null;
+  const useChatHook = typeof props.useChat === 'function' ? props.useChat : null;
+  const [source, setSource] = useState(storedSource);
+  const [probeFailed, setProbeFailed] = useState(false);
+  const liveCapable = !!useProjectionHook && !probeFailed;
+  const demoOn = source === 'demo' || !liveCapable;
+  const demoOnRef = useRef(demoOn);
+  demoOnRef.current = demoOn;
+  const sessionKey = props.sessionId || '';
+  const [sceneGen, setSceneGen] = useState(0);
+  const [liveSeen, setLiveSeen] = useState(false);
+  const [liveWaited, setLiveWaited] = useState(false);
+  const viewRef = useRef(undefined);
+  const pressureRef = useRef(undefined);
+  const lastTurnRef = useRef('');
+  const meterRef = useRef(null);
+  if (!meterRef.current) meterRef.current = createStreamMeter();
+  const balanceRef = useRef({ status: 'loading', balance: null, currency: 'CNY', toppedUp: null, granted: null, source: null });
+  const balanceTimer = useRef(0);
+  const balanceAbort = useRef(null);
+
   // HUD numbers refresh at most every 200 ms, and not at all while the scene is paused.
   const schedule = useCallback(() => {
     if (pendingRef.current) return;
@@ -480,12 +581,109 @@ export function ProcessView(props) {
     if (sceneRef.current) sceneRef.current.setQuality(q);
   }, []);
 
-  // Scene and demo driver lifecycle; Retry remounts by bumping mountKey.
+  // ---- live data -------------------------------------------------------------------------
+  const sessionRef = useRef({ running: undefined, blank: false });
+
+  /** Show the newest projection view (with DSH's context pressure) in the scene and HUD. */
+  const pushLiveState = useCallback(() => {
+    if (demoOnRef.current) return;
+    modelRef.current = withContext(viewRef.current, pressureRef.current) || initialState();
+    if (sceneRef.current) sceneRef.current.setState(modelRef.current);
+    schedule();
+  }, [schedule]);
+
+  const applyBalance = useCallback((b) => {
+    balanceRef.current = b;
+    if (demoOnRef.current) return;
+    Object.assign(liveRef.current, {
+      balance: b.balance,
+      currency: b.currency,
+      balanceStatus: b.status,
+      toppedUp: b.toppedUp,
+      granted: b.granted,
+      balanceSource: b.source,
+    });
+    if (sceneRef.current) sceneRef.current.setLive({ balance: b.balance, currency: b.currency, balanceStatus: b.status });
+    schedule();
+  }, [schedule]);
+
+  const loadBalance = useCallback(() => {
+    if (demoOnRef.current) return;
+    if (balanceAbort.current) balanceAbort.current.abort();
+    const ac = typeof AbortController === 'function' ? new AbortController() : null;
+    balanceAbort.current = ac;
+    fetchBalance({ lang: langRef.current, signal: ac ? ac.signal : undefined }).then((b) => {
+      if (ac && ac.signal.aborted) return;
+      balanceAbort.current = null;
+      // A failed refresh keeps the last known balance; signing out clears it.
+      if (b.status !== 'ready' && b.status !== 'signed-out' && balanceRef.current.balance != null) return;
+      applyBalance(b);
+    }, () => {});
+  }, [applyBalance]);
+
+  const queueBalance = useCallback((ms) => {
+    clearTimeout(balanceTimer.current);
+    balanceTimer.current = setTimeout(loadBalance, ms);
+  }, [loadBalance]);
+
+  const onView = useCallback((value) => {
+    viewRef.current = value;
+    if (value) setLiveSeen(true);
+    pushLiveState();
+    // The balance changes once a turn's requests are billed; ask again shortly after it ends.
+    const turns = value && Array.isArray(value.turns) ? value.turns : [];
+    const last = turns.length ? turns[turns.length - 1] : null;
+    const key = last ? `${last.no}:${last.status}` : '';
+    if (lastTurnRef.current && key !== lastTurnRef.current && last && last.status !== 'running') {
+      queueBalance(BALANCE_AFTER_TURN_MS);
+    }
+    lastTurnRef.current = key;
+  }, [pushLiveState, queueBalance]);
+
+  const onPressure = useCallback((value) => {
+    pressureRef.current = value;
+    pushLiveState();
+  }, [pushLiveState]);
+
+  const onSessionFlags = useCallback((flags) => {
+    const running = flags ? flags[0] === '1' : undefined;
+    sessionRef.current = { running, blank: flags ? flags[1] === '1' : false };
+    if (demoOnRef.current) return;
+    liveRef.current.running = running;
+    if (sceneRef.current) sceneRef.current.setLive({ running });
+    schedule();
+  }, [schedule]);
+
+  const applyStream = useCallback((r) => {
+    if (demoOnRef.current) return;
+    const live = liveRef.current;
+    if (live.phase === r.phase && Math.abs((live.tps || 0) - r.tps) < 0.05) return;
+    live.phase = r.phase;
+    live.tps = r.tps;
+    if (sceneRef.current) sceneRef.current.setLive({ phase: r.phase, tps: r.tps });
+    schedule();
+  }, [schedule]);
+
+  const onPartial = useCallback((partial) => {
+    applyStream(meterRef.current.push(partial, nowMs()));
+  }, [applyStream]);
+
+  const onProbeError = useCallback((err) => {
+    setProbeFailed(true);
+    if (typeof console !== 'undefined') console.warn('[dsh-work-process-3d] live data unavailable:', err);
+  }, []);
+
+  const chooseSource = useCallback((next) => {
+    if (next !== 'live' && next !== 'demo') return;
+    setSource(next);
+    writeStored(SOURCE_KEY, next === 'demo' ? 'demo' : null);
+  }, []);
+
+  // Scene lifecycle; Retry remounts by bumping mountKey. The data feed below fills it.
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return undefined;
     let scene = null;
-    let demo = null;
     let cancelled = false;
     let raf2 = 0;
     setLoading(true);
@@ -523,7 +721,7 @@ export function ProcessView(props) {
           fps: fpsRef.current,
           look: lookRef.current,
           brightness: brightRef.current,
-          demo: DEMO,
+          demo: demoOnRef.current,
           onHover: setHover,
           onSelect: (id) => {
             const preset = presetFor(id);
@@ -572,24 +770,8 @@ export function ProcessView(props) {
       scene.setLabels(labelSpec(langRef.current));
       scene.setLabelsVisible(labelsOnRef.current);
       scene.setPerfDetail(perfOnRef.current);
-
-      demo = createDemo({
-        onEvents: (events) => {
-          modelRef.current = reduceAll(modelRef.current, events);
-          scene.setState(modelRef.current);
-          schedule();
-        },
-        onLive: (live) => {
-          liveRef.current = { ...liveRef.current, ...live };
-          scene.setLive(live);
-          schedule();
-        },
-      });
-      modelRef.current = reduceAll(initialState(), demo.prefill(2));
-      liveRef.current = { phase: 'idle', tps: 0, balance: demo.balance, currency: 'CNY' };
-      scene.setState(modelRef.current);
-      scene.setLive(liveRef.current);
-      demo.start();
+      // The data feed effect starts once it sees the new scene.
+      setSceneGen((g) => g + 1);
       render();
     };
 
@@ -604,13 +786,95 @@ export function ProcessView(props) {
       cancelled = true;
       cancelAnimationFrame(raf1);
       cancelAnimationFrame(raf2);
-      if (demo) demo.stop();
       if (scene) scene.dispose();
       sceneRef.current = null;
       clearTimeout(pendingRef.current);
       pendingRef.current = 0;
     };
   }, [mountKey, applyQuality, schedule, showToast]);
+
+  // Data feed: the demo session, or this session's live projection. Starts over when the scene
+  // is rebuilt, the source changes or the view shows another session.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return undefined;
+    scene.resetState();
+    scene.setDemo(demoOn);
+    meterRef.current.reset();
+    if (demoOn) {
+      // A Retry disposes the scene before this effect sees its successor.
+      const current = () => sceneRef.current === scene;
+      const demo = createDemo({
+        onEvents: (events) => {
+          if (!current()) return;
+          modelRef.current = reduceAll(modelRef.current, events);
+          scene.setState(modelRef.current);
+          schedule();
+        },
+        onLive: (live) => {
+          if (!current()) return;
+          Object.assign(liveRef.current, live);
+          scene.setLive(live);
+          schedule();
+        },
+      });
+      modelRef.current = reduceAll(initialState(), demo.prefill(2));
+      liveRef.current = { phase: 'idle', tps: 0, balance: demo.balance, currency: 'CNY', balanceStatus: 'ready', running: undefined };
+      scene.setState(modelRef.current);
+      scene.setLive(liveRef.current);
+      demo.start();
+      render();
+      return () => demo.stop();
+    }
+    const b = balanceRef.current;
+    liveRef.current = {
+      phase: 'idle',
+      tps: 0,
+      balance: b.balance,
+      currency: b.currency,
+      balanceStatus: b.status,
+      toppedUp: b.toppedUp,
+      granted: b.granted,
+      balanceSource: b.source,
+      running: sessionRef.current.running,
+    };
+    scene.setLive(liveRef.current);
+    lastTurnRef.current = '';
+    pushLiveState();
+    render();
+    return undefined;
+  }, [sceneGen, demoOn, sessionKey, schedule, pushLiveState]);
+
+  // Live balance: at once, every two minutes while the view is visible, and after each turn.
+  useEffect(() => {
+    if (demoOn) return undefined;
+    loadBalance();
+    const id = setInterval(() => {
+      const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      if (activeRef.current && !hidden) loadBalance();
+    }, BALANCE_REFRESH_MS);
+    return () => {
+      clearInterval(id);
+      clearTimeout(balanceTimer.current);
+      if (balanceAbort.current) balanceAbort.current.abort();
+      balanceAbort.current = null;
+    };
+  }, [demoOn, loadBalance]);
+
+  // While text streams, the rate falls when chunks stop arriving.
+  useEffect(() => {
+    if (demoOn) return undefined;
+    const id = setInterval(() => applyStream(meterRef.current.tick(nowMs())), STREAM_TICK_MS);
+    return () => clearInterval(id);
+  }, [demoOn, applyStream]);
+
+  // Live data that does not arrive gets an explanation after a while.
+  useEffect(() => {
+    setLiveWaited(false);
+    if (demoOn || liveSeen) return undefined;
+    const id = setTimeout(() => setLiveWaited(true), LIVE_WAIT_MS);
+    return () => clearTimeout(id);
+  }, [demoOn, liveSeen]);
 
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
@@ -752,7 +1016,8 @@ export function ProcessView(props) {
   const m = metrics(s);
   const price = priceFor(s.provider, s.model);
   const peak = isPeak(Date.now());
-  const phase = live.phase && live.phase !== 'idle' ? live.phase : s.phase;
+  // Same rule as the scene: the live stream wins, a stopped session is idle.
+  const phase = live.phase && live.phase !== 'idle' ? live.phase : live.running === false ? 'idle' : s.phase;
   const balance = typeof live.balance === 'number' ? live.balance : null;
   const currency = live.currency || 'CNY';
   const affordable = balance != null && price && currency !== 'USD' ? affordableTokens(balance, price, peak) : 0;
@@ -766,9 +1031,12 @@ export function ProcessView(props) {
   const cards = [
     {
       id: 'balance',
-      k: DEMO ? t('m.balanceDemo') : t('m.balance'),
-      v: balance == null ? t('m.balanceNone') : formatMoney(balance, currency),
+      k: demoOn ? t('m.balanceDemo') : t('m.balance'),
+      v: balanceText(t, balance, currency, live.balanceStatus),
       s: affordable ? t('m.balanceSub', { tokens: formatTokens(affordable) }) : '',
+      title: !demoOn && balance != null && live.toppedUp != null
+        ? t('m.balanceTitle', { topped: formatMoney(live.toppedUp, currency), granted: formatMoney(live.granted || 0, currency) })
+        : undefined,
     },
     {
       id: 'context',
@@ -830,7 +1098,10 @@ export function ProcessView(props) {
     },
   ];
   const recent = s.calls.slice(-5).reverse();
-  const tipData = { t, s, live, lang, price, peak, m, phase, balance, currency };
+  const tipData = { t, s, live, lang, price, peak, m, phase, balance, currency, demo: demoOn };
+  // Live status line under the title.
+  const liveMissing = !demoOn && !liveSeen && liveWaited;
+  const liveIdle = !demoOn && liveSeen && s.turnCount === 0 && !s.calls.length;
   const failed = !!error && error.kind === 'webgl';
   const hud = !loading && !failed;
   const screenIds = screenId && sceneRef.current ? sceneRef.current.screens() : [];
@@ -839,6 +1110,26 @@ export function ProcessView(props) {
   return (
     <div ref={rootRef} className={`dwp3d-root${failed ? ' fail' : ''}`}>
       <style>{CSS}</style>
+      {!demoOn ? (
+        <React.Fragment>
+          <ProbeBoundary onError={onProbeError}>
+            <ProjectionProbe use={useProjectionHook} name={PROJECTION_KEY} onValue={onView} />
+          </ProbeBoundary>
+          <ProbeBoundary>
+            <ProjectionProbe use={useProjectionHook} name="contextPressure" onValue={onPressure} />
+          </ProbeBoundary>
+          {useSessionHook ? (
+            <ProbeBoundary>
+              <SessionProbe use={useSessionHook} onValue={onSessionFlags} />
+            </ProbeBoundary>
+          ) : null}
+          {useChatHook ? (
+            <ProbeBoundary>
+              <StreamProbe use={useChatHook} onValue={onPartial} />
+            </ProbeBoundary>
+          ) : null}
+        </React.Fragment>
+      ) : null}
       {/* Focusable so the roaming camera can take WASD / arrow keys while the scene is focused. */}
       <div ref={stageRef} className="dwp3d-stage" tabIndex={0} role="application" aria-label={t('stage.label')} />
       {/* Clicking anywhere outside the display popover closes it. */}
@@ -849,14 +1140,23 @@ export function ProcessView(props) {
           <div className="dwp3d-panel dwp3d-title">
             <div className="dwp3d-title-row">
               <h2>{t('title')}</h2>
-              {DEMO ? <span className="dwp3d-chip demo">{t('badge.demo')}</span> : null}
+              {demoOn
+                ? <span className="dwp3d-chip demo">{t('badge.demo')}</span>
+                : <span className="dwp3d-chip live" title={t('badge.liveHint')}>{t('badge.live')}</span>}
               {s.model ? <span className="dwp3d-chip">{`${s.model}${s.effort ? ` · ${s.effort}` : ''}`}</span> : null}
               <span className="dwp3d-chip">
                 <i className="dwp3d-dot" style={{ color: PHASE_COLOR[phase] || PHASE_COLOR.idle }} aria-hidden="true" />
                 {`${t('phase.' + phase)}${tpsText}`}
               </span>
             </div>
-            {DEMO ? <p className="dwp3d-note">{t('badge.demoHint')}</p> : null}
+            {demoOn ? <p className="dwp3d-note">{t(liveCapable ? 'badge.demoHint' : probeFailed ? 'live.failed' : 'live.unsupported')}</p> : null}
+            {liveMissing ? (
+              <p className="dwp3d-note dwp3d-warn" role="status">
+                {t('live.missing')}{' '}
+                <button type="button" className="dwp3d-link" onClick={() => chooseSource('demo')}>{t('live.showDemo')}</button>
+              </p>
+            ) : null}
+            {liveIdle ? <p className="dwp3d-note">{t('live.idle')}</p> : null}
             {renderWarn ? <p className="dwp3d-note dwp3d-warn" role="alert">{t('error.shader', { msg: renderWarn })}</p> : null}
           </div>
           <div className="dwp3d-right">
@@ -923,6 +1223,28 @@ export function ProcessView(props) {
           </div>
           {displayOpen ? (
             <div className="dwp3d-panel dwp3d-pop" role="dialog" aria-label={t('ctl.display')}>
+              <div className="dwp3d-pop-row">
+                <span className="dwp3d-pop-k">{t('source.label')}</span>
+                <div className="dwp3d-seg" role="group" aria-label={t('source.label')}>
+                  {['live', 'demo'].map((id) => {
+                    const on = id === 'demo' ? demoOn : !demoOn;
+                    const disabled = id === 'live' && !liveCapable;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        className={`dwp3d-btn${on ? ' on' : ''}`}
+                        aria-pressed={on}
+                        disabled={disabled}
+                        title={disabled ? t('live.unsupported') : t('source.' + id + 'Hint')}
+                        onClick={() => chooseSource(id)}
+                      >
+                        {t('source.' + id)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <div className="dwp3d-pop-row">
                 <span className="dwp3d-pop-k">{t('look.label')}</span>
                 <div className="dwp3d-seg" role="group" aria-label={t('look.label')}>

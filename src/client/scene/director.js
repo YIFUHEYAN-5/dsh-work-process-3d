@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Polyline, clamp, lerp, easeInOut, angleDelta } from './util.js';
 import { PORT_R, RETRACT_R, LIFT, WAFER_Y, LOCK_THETA, OUT_THETA } from './cell.js';
 import { PRODUCTIVE_KINDS, STATION_INFO, MACHINE_INFO } from '../../model/stations.js';
+import { fileCountOf } from './stocker.js';
 
 /*
  * The director turns model snapshots into physical motion. Every tool call
@@ -48,7 +49,7 @@ export function looksForTurn(turn, calls) {
   let missing = Math.max(0, (turn.calls || 0) - mine);
   const addBad = Math.min(missing, Math.max(0, (turn.errors || 0) - bad));
   missing -= addBad;
-  const addGold = Math.min(missing, Math.max(0, (turn.files ? turn.files.length : 0) - gold));
+  const addGold = Math.min(missing, Math.max(0, fileCountOf(turn) - gold));
   missing -= addGold;
   return [...Array(addBad).fill('bad'), ...Array(addGold).fill('gold'), ...Array(missing).fill('normal'), ...known];
 }
@@ -282,6 +283,7 @@ export function createDirector({ cell, stations, stocker, engine, wafers, root }
   /** First snapshot: lay out the current situation without animating history. */
   function firstSync(state) {
     clearAll();
+    stocker.clear();
     for (const tn of state.turns) Object.assign(rec(tn.no), { info: tn, status: tn.status });
     const finished = state.turns.filter((tn) => tn.status !== 'running');
     for (const tn of finished) rec(tn.no).shipped = true;
@@ -594,6 +596,17 @@ export function createDirector({ cell, stations, stocker, engine, wafers, root }
 
   return {
     sync,
+    /** Forget everything shown; the next sync lays out its state from scratch. */
+    reset() {
+      clearAll();
+      stocker.clear();
+      stocker.resetDock(null, null, []);
+      runningByKind = {};
+      runningCalls = [];
+      maxTurn = 0;
+      lastTurnCount = 0;
+      first = true;
+    },
     update(dt, t) {
       now = t;
       rush = 1 + 0.35 * Math.min(4, Math.max(0, jobs.size - 2) / 2);

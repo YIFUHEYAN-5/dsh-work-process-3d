@@ -427,10 +427,11 @@ const DRAW = { flow: drawFlow, main: drawMain, cost: drawCost };
 // ── Scene objects ───────────────────────────────────────────────
 
 /**
- * buildScreens(M, glow, { demo }) → { root, update(dt, t, info), hover, setDetail(id, scale), reset() }.
+ * buildScreens(M, glow, { demo }) → { root, update(dt, t, info), hover, setDetail(id, scale), setDemo(on), reset() }.
  * info: { state, live, tps, peak }.
  */
-export function buildScreens(M, glow, { demo = false } = {}) {
+export function buildScreens(M, glow, { demo: demoInit = false } = {}) {
+  let demo = !!demoInit;
   const root = new THREE.Group();
   root.name = 'screens';
   const screens = [];
@@ -474,7 +475,7 @@ export function buildScreens(M, glow, { demo = false } = {}) {
   function data(info) {
     const s = info.state;
     const live = info.live || {};
-    const phase = live.phase && live.phase !== 'idle' ? live.phase : s ? s.phase : 'idle';
+    const phase = info.phase || (live.phase && live.phase !== 'idle' ? live.phase : s ? s.phase : 'idle');
     const T = s ? s.totals : { miss: 0, hit: 0, write: 0, output: 0, reasoning: 0, requests: 0, cost: 0, costPeak: 0, costOffPeak: 0, savings: 0 };
     const m = s ? metrics(s) : { hitRate: 0, toolSuccess: 1, contextRatio: 0 };
     const turns = s ? s.turns : [];
@@ -521,7 +522,7 @@ export function buildScreens(M, glow, { demo = false } = {}) {
     }
     if (id === 'main') {
       const last = d.recent[d.recent.length - 1];
-      return `${d.model}|${d.effort}|${d.phase}|${d.turn}|${d.ok}|${d.rework}|${d.calls}|${d.running}|${d.files}|${d.added}|${d.removed}|${d.requests}|${d.recent.length}|${last ? `${last.id}:${last.status}` : ''}|${Math.round(d.toolSuccess * 1000)}`;
+      return `${d.demo}|${d.model}|${d.effort}|${d.phase}|${d.turn}|${d.ok}|${d.rework}|${d.calls}|${d.running}|${d.files}|${d.added}|${d.removed}|${d.requests}|${d.recent.length}|${last ? `${last.id}:${last.status}` : ''}|${Math.round(d.toolSuccess * 1000)}`;
     }
     return `${d.cost.toFixed(5)}|${d.costPeak.toFixed(5)}|${d.savings.toFixed(5)}|${d.ctx}|${d.window}|${d.peak}|${d.requests}|${costHist[COST_SAMPLES - 1].toFixed(5)}|${Math.round(d.hitRate * 1000)}`;
   }
@@ -587,6 +588,11 @@ export function buildScreens(M, glow, { demo = false } = {}) {
         }
         old.tex.dispose();
       }
+    },
+    /** Show or drop the demo badge. */
+    setDemo(on) {
+      demo = !!on;
+      for (const S of screens) S.sig = '';
     },
     /** Clears the chart history (a new session was loaded). */
     reset() {

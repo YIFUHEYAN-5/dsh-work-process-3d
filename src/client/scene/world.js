@@ -63,12 +63,22 @@ function trimReflection(scene, minRadius) {
 
 const NICE = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
 
+// Fuel readout note under "— —" when no balance is known (live.balanceStatus).
+const BALANCE_NOTES = {
+  loading: '读取中 · loading',
+  'signed-out': '未登录账户 · not signed in',
+  failed: '查询失败 · query failed',
+  unavailable: '余额不可用 · balance unavailable',
+};
+
 /**
  * Build the complete factory scene for one quality tier. The returned object is driven by
  * `setState` (reduced session model) and `setLive` (stream ticks); `setLook` switches between
- * the dusk and day looks, `setBrightness` scales exposure.
+ * the dusk and day looks, `setBrightness` scales exposure, `setDemo` marks fictional data and
+ * `resetState` clears everything a session left behind.
  */
-export function buildWorld(renderer, quality, { environment = true, demo = false, look = DEFAULT_LOOK, brightness = BRIGHTNESS.initial } = {}) {
+export function buildWorld(renderer, quality, { environment = true, demo: demoInit = false, look = DEFAULT_LOOK, brightness = BRIGHTNESS.initial } = {}) {
+  let demo = !!demoInit;
   const scene = new THREE.Scene();
   // The sky dome draws the background; no fog (the city outside applies its own haze).
   scene.background = null;
@@ -128,7 +138,7 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
     { id: 'living', anchor: living.labelAnchor },
   ];
 
-  const live = { phase: 'idle', tps: 0, balance: null, currency: 'CNY' };
+  const live = { phase: 'idle', tps: 0, balance: null, currency: 'CNY', balanceStatus: 'unavailable' };
   const screenInfo = { state: null, live, tps: 0, peak: false };
   const stageInfo = { activity: 0, tps: 0, model: '', phase: 'idle' };
   let state = null;
@@ -150,7 +160,7 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
       : { text: '燃料 · 账户余额   FUEL', size: 30, color: '#7f9cff', weight: 700, gap: 50 }];
     if (bal == null) {
       lines.push({ text: '— —', size: 88, color: '#8c97ad', weight: 700, mono: true, gap: 108 });
-      lines.push({ text: '余额不可用 · balance unavailable', size: 28, color: '#8c97ad', gap: 56 });
+      lines.push({ text: BALANCE_NOTES[live.balanceStatus] || BALANCE_NOTES.unavailable, size: 28, color: '#8c97ad', gap: 56 });
     } else {
       lines.push({ text: `${sym} ${bal.toFixed(2)}`, size: 92, color: '#e9f0ff', weight: 700, mono: true, gap: 108 });
       const tok = live.currency === 'USD' ? 0 : affordableTokens(bal, price, peak);
@@ -230,6 +240,24 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
       if (!next) return;
       Object.assign(live, next);
     },
+    isDemo: () => demo,
+    /** Mark the data as fictional (demo) or real; only the readouts change. */
+    setDemo(on) {
+      if (demo === !!on) return;
+      demo = !!on;
+      screens.setDemo(demo);
+      readoutT = 1;
+    },
+    /** Forget the session shown so far (another session or another data source follows). */
+    resetState() {
+      state = null;
+      errors = 0;
+      errorPulse = false;
+      maxBalance = 0;
+      director.reset();
+      screens.reset();
+      readoutT = 1;
+    },
     /** True while something animates that deserves the higher frame rate. */
     busy() {
       return director.busy() || (live.phase && live.phase !== 'idle') || tps > 1;
@@ -242,7 +270,9 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
         readout();
       }
       const totals = state ? state.totals : { miss: 0, hit: 0, output: 0, reasoning: 0, cost: 0 };
-      const phase = live.phase && live.phase !== 'idle' ? live.phase : state ? state.phase : 'idle';
+      // The live stream wins; a session that is known to have stopped shows idle even when
+      // its log ended mid-turn.
+      const phase = live.phase && live.phase !== 'idle' ? live.phase : live.running === false ? 'idle' : state ? state.phase : 'idle';
       const flow = tps > 0.5 ? clamp(0.2 + tps / 90, 0, 1) : 0;
       activity = damp(activity, activityTarget(phase), 1.6, dt);
       stageInfo.activity = activity;
@@ -264,6 +294,7 @@ export function buildWorld(renderer, quality, { environment = true, demo = false
       living.update(dt, t);
       updateChannels(dt, flow, phase);
       screenInfo.state = state;
+      screenInfo.phase = phase;
       screenInfo.tps = tps;
       screenInfo.peak = peak;
       screens.update(dt, t, screenInfo);

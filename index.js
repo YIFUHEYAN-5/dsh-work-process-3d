@@ -1,5 +1,3 @@
-// Host half of dsh-work-process-3d.
-// M0 (style prototype): the 3D view runs on built-in demo data, so the Host half
-// registers nothing yet. M1 adds a session projection that feeds real session
-// events (tokens, tool calls, turns, file changes) to the view.
-export function apply() {}
+// Host half of dsh-work-process-3d: the session projection the 3D view reads and the
+// balance route for the fuel tank. Source in src/host/, bundled by scripts/build.mjs.
+export { name, inject, apply } from './dist/host.js';

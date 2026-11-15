@@ -339,3 +339,37 @@ test('first sync places history without animation and survives a reset', () => {
   assertFinite(world.scene);
   world.dispose();
 });
+
+test('another session or data source starts from an empty line', () => {
+  const demo = createDemo({});
+  const world = buildWorld(null, 'medium', { environment: false, demo: true });
+  const batches = () => world.hoverTargets().filter((o) => String(o.userData.hoverId).startsWith('foup:')).length;
+  world.setState(reduceAll(initialState(), demo.prefill(2)));
+  for (let k = 0; k < 150; k++) world.update(1 / 30, k / 30);
+  assert.ok(batches() >= 2, 'the demo history is on the stocker');
+  assert.equal(world.isDemo(), true);
+  world.setDemo(false);
+  assert.equal(world.isDemo(), false);
+
+  world.resetState();
+  for (let k = 0; k < 10; k++) world.update(1 / 30, 5 + k / 30);
+  assert.equal(batches(), 0, 'no batch of the previous session is left');
+  assert.equal(world.stats().inflight, 0);
+  assert.equal(world.stats().dock, null, 'the load port waits for the next turn');
+
+  // A live session with one finished turn lays out its own history without animation.
+  const T0 = Date.UTC(2026, 10, 15, 12, 0, 0);
+  const live = reduceAll(initialState(), [
+    { type: 'turn/start', seq: 1, time: T0, data: { turn: 1 } },
+    { type: 'tool/call', seq: 2, time: T0 + 10, data: { turn: 1, step: 1, callId: 'c1', name: 'read', arguments: '{"file_path":"a.js"}' } },
+    { type: 'tool/result', seq: 3, time: T0 + 20, data: { turn: 1, step: 1, message: { toolCallId: 'c1' } } },
+    { type: 'turn/end', seq: 4, time: T0 + 30, data: { turn: 1, reason: { kind: 'completed' } } },
+  ]);
+  world.setLive({ running: false, balanceStatus: 'signed-out' });
+  world.setState(live);
+  for (let k = 0; k < 30; k++) world.update(1 / 30, 6 + k / 30);
+  assert.equal(batches(), 1);
+  assert.equal(world.stats().inflight, 0);
+  assertFinite(world.scene);
+  world.dispose();
+});
