@@ -12,6 +12,7 @@ DeepSeek 的拟人化形象「蓝色大肥鱼」（女仆装鲸鱼娘），准�
 - [x] 着色：赛璐璐两色调 + 边缘光 + 描边（`src/toon.js`）
 - [x] 绑骨和 10 个预设动作：Tripo 自动绑骨 v1.0，蒙皮权重重新修过（`assets/whale_rigged.glb`）
 - [x] 离线预览：打包成一个双击就能打开的 HTML 文件（`viewer/`）
+- [x] 手：从手腕开始按肤色划出整只手，整只手跟着手骨动，不再被裙子扯开（`tools/rig/check_hands.py` 检查）
 - [ ] 脸部贴片：程序绘制的大眼睛和嘴，支持眨眼和 ^^、💢、犯困等表情
 - [ ] 交互：悬停注视、摸头、点身体生气、点尾巴受惊、双击吃白饭、30 秒无操作犯困
 - [ ] 接入场景：模型打包进懒加载的 `dist/client.whale.js`（插件资源路由只提供 svg/png/webp/jpg，不能直接放 .glb）
@@ -27,12 +28,12 @@ DeepSeek 的拟人化形象「蓝色大肥鱼」（女仆装鲸鱼娘），准�
 | `preview/turntable.html` | 多视角预览页，可以按时间点摆出动作，参数写在文件开头的注释里 |
 | `preview/cdp.mjs` | 用无头 Edge 渲染预览页并截图 |
 | `viewer/` | 离线预览：`build.mjs` 打包，`main.js` 页面逻辑，`issues.js` 问题定位列表，`viewer.html` 页面模板 |
-| `assets/whale_rigged.glb` | 绑骨模型：41 根骨骼、10 个动作、修过的蒙皮权重，75,585 个三角面，2048² 底色贴图，4.4 MB |
+| `assets/whale_rigged.glb` | 绑骨模型：41 根骨骼、10 个动作、修过的蒙皮权重，75,666 个三角面，2048² 底色贴图，4.4 MB |
 | `assets/whale_body.glb` | Tripo 生成的身体（未绑骨）：75,753 个三角面，4096² 贴图 |
 | `assets/landmarks.json` | 在归一化坐标里测得的头顶位置和头发颜色 |
 | `assets/source/tripo_input.png` | 生成身体用的输入图 |
 | `tools/` | 读取 GLB 和测量用的 Python 小工具（需要 numpy、Pillow） |
-| `tools/rig/` | 修蒙皮权重（`fix_weights.py`）、组装绑骨模型（`build_rigged.py`）、评估变形（`collect_mats.mjs`、`eval_skin.py`） |
+| `tools/rig/` | 修蒙皮权重（`fix_weights.py`）、组装绑骨模型（`build_rigged.py`）、检查手（`check_hands.py`）、评估变形（`collect_mats.mjs`、`eval_skin.py`） |
 | `tripo/client.mjs` | Tripo v3 API 客户端 |
 | `tripo/rig.mjs`、`tripo/anims.mjs` | 调用 Tripo 绑骨和动作重定向，结果下载到 `tripo/raw/` |
 | `docs/` | 渲染图和动作预览动图 |
@@ -76,22 +77,23 @@ tail.update(time, { dt });
 Tripo v1.0 自动绑骨的权重在大动作里变形严重。A 字姿势里手垂在裙子旁边，长发和裙摆两侧被分给了手臂；裙子整块跟着大腿扭转骨转。`tools/rig/fix_weights.py` 先把顶点分成头、头发、躯干、手臂、手、腿、裙子几部分，再按部位重新分配权重：
 
 - 头发跟着头和上身；裙子上沿跟着腰，越往下越多地跟着大腿；手臂的权重只留在同侧躯干上。
-- 切开 1,027 个把手臂或手和裙子、头发、躯干连在一起的三角形，`build_rigged.py` 再把切口两侧分别补上（859 个三角形）。
+- 手从手腕开始按贴图颜色往外找：沿着肤色（包括手心和指缝里偏暗的肤色）和手腕处袖口的白色花边，一直找到深蓝色的裙子和袖子为止，离手腕最远 11 cm。手腕往外 4.5 cm 以后整只手只跟手骨；从手腕往里 1 cm 到往外 4.5 cm，权重从手臂逐渐过渡到手骨。
+- 切开 477 个把手臂或手和裙子、头发、躯干连在一起的三角形，`build_rigged.py` 再把切口两侧分别补上（390 个三角形）。
 - 部位交界处的权重做平滑过渡。
 
-下表是 10 个动作每 0.25 s 采样一次的结果，箭头左边是 Tripo 原始权重，右边是修复后。模型共 75,585 个三角形，「变形三角形」指至少有一条边被拉长到 1.35 倍以上或压缩到 0.7 倍以下。
+下表是 10 个动作每 0.25 s 采样一次的结果，箭头左边是 Tripo 原始权重，右边是修复后。修复后的模型共 75,666 个三角形（Tripo 原始 75,753 个），「变形三角形」指至少有一条边被拉长到 1.35 倍以上或压缩到 0.7 倍以下。
 
 | 动作 | 变形三角形（平均） | 变形三角形（最差一帧） | 最大拉伸倍数 |
 | --- | --- | --- | --- |
-| `greet_01` | 7,248 → 1,131 | 18,113 → 2,873 | 36.8 → 11.0 |
+| `greet_01` | 7,248 → 1,140 | 18,113 → 2,908 | 36.8 → 11.0 |
 | `idle` | 1,478 → 249 | 2,118 → 489 | 8.8 → 2.8 |
-| `angry_01` | 17,058 → 2,646 | 23,285 → 4,428 | 45.5 → 10.6 |
-| `fold_arms` | 16,087 → 1,346 | 20,091 → 1,786 | 35.3 → 14.0 |
-| `laugh_01` | 9,766 → 3,629 | 17,194 → 12,291 | 32.7 → 12.1 |
-| `scared_01` | 15,202 → 3,523 | 16,421 → 5,144 | 44.7 → 7.7 |
-| `scratch` | 11,383 → 3,286 | 22,532 → 14,036 | 42.2 → 17.5 |
-| `bow` | 2,909 → 1,382 | 5,166 → 5,358 | 23.6 → 5.1 |
-| `heart_pose` | 15,799 → 3,466 | 26,150 → 6,086 | 32.6 → 10.4 |
+| `angry_01` | 17,058 → 2,658 | 23,285 → 4,427 | 45.5 → 10.6 |
+| `fold_arms` | 16,087 → 1,359 | 20,091 → 1,803 | 35.3 → 14.0 |
+| `laugh_01` | 9,766 → 3,631 | 17,194 → 12,324 | 32.7 → 12.1 |
+| `scared_01` | 15,202 → 3,557 | 16,421 → 5,200 | 44.7 → 7.7 |
+| `scratch` | 11,383 → 3,289 | 22,532 → 14,034 | 42.2 → 17.5 |
+| `bow` | 2,909 → 1,382 | 5,166 → 5,356 | 23.6 → 5.1 |
+| `heart_pose` | 15,799 → 3,508 | 26,150 → 6,164 | 32.6 → 10.4 |
 | `look_around` | 3,243 → 1,190 | 5,604 → 4,483 | 17.1 → 6.5 |
 
 ![蒙皮权重修复前后](docs/skin_compare.webp)
@@ -101,6 +103,14 @@ Tripo v1.0 自动绑骨的权重在大动作里变形严重。A 字姿势里手�
 - 抬腿时裙子跟着腿走，`laugh_01` 和 `scratch` 最明显，最差一帧仍有 1.2 万到 1.4 万个变形三角形。
 - `scared_01`、`look_around`、`laugh_01`、`scratch` 里长发有 2,000 到 4,000 个三角形被拉伸。
 - 表里的最大拉伸倍数来自胸口（`Spine02` 附近）和左腋下的少数三角形。
+
+### 手
+
+第一版只按离手骨的距离划分手：左手 354 个肤色顶点里有 101 个、右手 422 个里有 207 个被分到了身体上，还有 529 个手和袖口内部的三角形被当成连着裙子切掉了，所以手一动就被扯开。现在的划分方法见上面第二条。`tools/rig/check_hands.py` 逐只手检查四件事：手内部没有三角形被切开；手的顶点至少 99% 连成一块；每个顶点都跟着同侧手臂；手腕往外 4.5 cm 以后只跟手骨。`test/whale.test.mjs` 不用 Python，也检查每只手连成一块，并且没有三角形把手和手臂以外的骨骼连在一起。
+
+下图是 10 个动作里两只手的特写，每个动作取全身变形三角形最多的那一帧：
+
+![手的特写：修复前后](docs/hands.webp)
 
 ## 预览
 
@@ -117,8 +127,8 @@ node whale/viewer/build.mjs
 页面上可以：
 
 - 播放 10 个动作或停在绑定姿势，拖时间轴，用 ←/→ 逐帧，慢放到 0.25×。
-- 切换卡通着色、原贴图和变形热图。热图的颜色和左上角的三角形计数与上面「蒙皮权重」一节用同一个标准，同一帧的数字和表里一致。
-- 切换修复后和 Tripo 原始权重，开关描边、尾巴、呆毛和骨骼，切换视角。
+- 切换卡通着色、原贴图和变形热图。热图的颜色和左上角的三角形计数与上面「蒙皮权重」一节用同一个标准，同一帧的数字和表里一致，个别帧因为浮点误差会差几个三角形。
+- 切换修复后和 Tripo 原始权重，开关描边、尾巴、呆毛和骨骼，切换视角（「左手」「右手」两个特写会跟着手移动）。
 - 点「问题定位」里的条目，直接跳到能看到这个问题的动作、时间和视角。
 
 URL 参数（`clip`、`t`、`shade`、`w`、`view`、`issue` 等）写在 `viewer/main.js` 开头。
@@ -147,12 +157,14 @@ node whale/tripo/rig.mjs --yes
 node whale/tripo/anims.mjs --yes
 python whale/tools/rig/fix_weights.py whale/tripo/raw/anim_test_idle_greet.glb whale/preview/out/weights.glb
 python whale/tools/rig/build_rigged.py whale/tripo/raw/anim_test_idle_greet.glb whale/preview/out/weights.glb whale/assets/whale_rigged.glb 2048 whale/tripo/raw/anim_anim2.glb whale/tripo/raw/anim_anim3.glb
+python whale/tools/rig/check_hands.py whale/tripo/raw/anim_test_idle_greet.glb whale/assets/whale_rigged.glb
 node whale/tools/rig/collect_mats.mjs whale/preview/out/mats.json
 python whale/tools/rig/eval_skin.py whale/tripo/raw/anim_test_idle_greet.glb whale/assets/whale_rigged.glb whale/preview/out/mats.json
 ```
 
 - `rig.mjs` 绑骨并做 `idle`、`greet_01`（45 积分），`anims.mjs` 做其余 8 个动作（80 积分）。任务 ID 记在 `tripo/rig_state.json`（不提交），中断后重新运行会继续等原来的任务。状态文件里没有的任务，只有加了 `--yes` 才会新建，因为新建任务要扣积分。绑骨的输入是下面的身体任务，需要用同一个 Tripo 账号。
 - `fix_weights.py` 不带额外参数时，用的就是上表那组参数。
+- `check_hands.py` 按「手」一节的四条检查两只手，有一条不通过就以退出码 1 结束。
 - 最后两步在无头 Edge 里每 0.25 s 采样一次每个动作的蒙皮矩阵，再逐个动作对比 Tripo 原始权重和新模型，结果打印出来并写到 `whale/preview/out/mats_eval.json`。
 
 ## 设计说明
