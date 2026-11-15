@@ -1,6 +1,6 @@
 {
   "name": "dsh-work-process-3d",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "dsh工作进程3D实时可视化：把 DeepSeek Harness 的 token 余量、消耗、工具调用与产出渲染成一台写实的精密机器。",
   "keywords": [
     "dsh",
@@ -33,7 +33,6 @@
     "index.js",
     "dist/client.js",
     "dist/host.js",
-    "src/model",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",

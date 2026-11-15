@@ -9,7 +9,7 @@ import { formatTokens, formatMoney, formatPct, formatDuration, fill } from '../f
 import { createStreamMeter, withContext, fetchBalance } from '../live.js';
 import { CSS } from './styles.js';
 
-const { useEffect, useRef, useState, useReducer, useCallback } = React;
+const { useEffect, useLayoutEffect, useRef, useState, useReducer, useCallback } = React;
 
 // Projection published by this plugin's Host part (src/host/projection.js).
 const PROJECTION_KEY = 'workProcess3d';
@@ -20,6 +20,7 @@ const LIVE_WAIT_MS = 5000;
 const BALANCE_REFRESH_MS = 120_000;
 const BALANCE_AFTER_TURN_MS = 4000;
 const STREAM_TICK_MS = 250;
+const LOST_WAIT_MS = 5000;
 // Holds only a tier the user picked; when absent the GPU-based default applies.
 const QUALITY_KEY = 'dwp3d.quality';
 const HINT_KEY = 'dwp3d.hint';
@@ -241,13 +242,33 @@ function labelSpec(lang) {
 
 const batchStatus = (turn) => (turn.status === 'running' ? 'running' : turn.status === 'ok' ? 'ok' : 'rework');
 
-const BALANCE_STATUS_KEYS = { loading: 'bal.loading', 'signed-out': 'bal.signedOut', failed: 'bal.failed', unavailable: 'bal.unavailable' };
+const BALANCE_STATUS_KEYS = {
+  loading: 'bal.loading',
+  'signed-out': 'bal.signedOut',
+  'no-host': 'bal.noHost',
+  failed: 'bal.failed',
+  unavailable: 'bal.unavailable',
+};
+// What the user can do about a missing balance (card title and tank tooltip).
+const BALANCE_HELP_KEYS = {
+  'signed-out': 'bal.signedOutHelp',
+  'no-host': 'bal.noHostHelp',
+  failed: 'bal.failedHelp',
+  unavailable: 'bal.unavailableHelp',
+};
 const nowMs = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
 
 /** The balance as money, or why there is none. */
 function balanceText(t, balance, currency, status) {
   if (balance != null) return formatMoney(balance, currency);
   return t(BALANCE_STATUS_KEYS[status] || 'bal.unavailable');
+}
+
+/** Next step for a missing live balance, or '' when there is a balance or nothing to do. */
+function balanceHelp(t, balance, status, demo) {
+  if (demo || balance != null) return '';
+  const key = BALANCE_HELP_KEYS[status];
+  return key ? t(key) : '';
 }
 
 function batchRows(t, turn) {
@@ -274,6 +295,8 @@ function tipFor(id, d) {
         rows.push([t('m.granted'), formatMoney(live.granted || 0, d.currency)]);
       }
       if (!d.demo && d.balance != null && live.balanceSource === 'api-key') rows.push(['', t('m.balanceViaKey')]);
+      const help = balanceHelp(t, d.balance, live.balanceStatus, d.demo);
+      if (help) rows.push(['', help]);
       if (price) {
         rows.push([t('price.peak'), `${perM(price.miss[1])} · ${perM(price.output[1])}`]);
         rows.push([t('price.off'), `${perM(price.miss[0])} · ${perM(price.output[0])}`]);
@@ -367,24 +390,42 @@ function tipFor(id, d) {
     const turn = s.turns.find((x) => x.no === no);
     return { title: t('hover.batch', { no }), body: '', rows: turn ? batchRows(t, turn) : [] };
   }
+  if (id.startsWith('card:')) {
+    const card = (d.cards || []).find((c) => c.id === id.slice(5));
+    if (!card) return null;
+    return { title: card.k, body: card.title || [card.v, card.s].filter(Boolean).join(' · '), rows: [] };
+  }
   return null;
 }
 
+const TIP_MARGIN = 8;
+
+/** Tooltip beside the pointer (or a focused card), measured and kept inside the view. */
 function Tooltip({ hover, data, rootRef }) {
   const tip = tipFor(hover.id, data);
+  const ref = useRef(null);
+  const [pos, setPos] = useState(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const root = rootRef.current;
+    if (!el || !root) return;
+    const W = root.clientWidth;
+    const H = root.clientHeight;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    let x = hover.x + 16;
+    if (x + w > W - TIP_MARGIN) x = hover.x - 14 - w;
+    let y = hover.y + 18;
+    if (y + h > H - TIP_MARGIN) y = hover.y - 12 - h;
+    x = Math.round(Math.max(TIP_MARGIN, Math.min(x, W - TIP_MARGIN - w)));
+    y = Math.round(Math.max(TIP_MARGIN, Math.min(y, H - TIP_MARGIN - h)));
+    setPos((p) => (p && p.x === x && p.y === y ? p : { x, y }));
+  });
   if (!tip) return null;
-  const root = rootRef.current;
-  const W = root ? root.clientWidth : 0;
-  const H = root ? root.clientHeight : 0;
-  const flipX = hover.x > W - 320;
-  const flipY = hover.y > H - 220;
-  const style = {
-    left: flipX ? hover.x - 14 : hover.x + 16,
-    top: flipY ? hover.y - 12 : hover.y + 18,
-    transform: `translate(${flipX ? '-100%' : '0'}, ${flipY ? '-100%' : '0'})`,
-  };
+  // The first layout pass measures the panel unseen; the effect then places it.
+  const style = pos ? { left: pos.x, top: pos.y } : { left: 0, top: 0, visibility: 'hidden' };
   return (
-    <div className="dwp3d-panel dwp3d-tip" style={style} role="tooltip">
+    <div ref={ref} className="dwp3d-panel dwp3d-tip" style={style} role="tooltip">
       <h4>{tip.title}</h4>
       {tip.body ? <p>{tip.body}</p> : null}
       {tip.rows.length ? (
@@ -401,19 +442,49 @@ function Tooltip({ hover, data, rootRef }) {
   );
 }
 
-function Card({ card }) {
-  const title = card.title || `${card.k} · ${card.v}${card.s ? ` · ${card.s}` : ''}`;
+const cardText = (card) => card.title || `${card.k} · ${card.v}${card.s ? ` · ${card.s}` : ''}`;
+
+const focusVisible = (el) => {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    return true;
+  }
+};
+
+/**
+ * One metric card. Mouse users read the explanation from the title; keyboard and touch users
+ * focus the card (Tab or tap) to get the same text as a tooltip via onTip(id, element).
+ */
+function Card({ card, uid, onTip }) {
+  const title = cardText(card);
   // The value glows briefly in the card's accent when it changes (not on first show).
   const prev = useRef(card.v);
   const [bump, setBump] = useState(0);
+  const touchRef = useRef(false);
   useEffect(() => {
     if (prev.current === card.v) return;
     prev.current = card.v;
     setBump((n) => n + 1);
   }, [card.v]);
   const accent = CARD_ACCENT[card.id];
+  const descId = `${uid}-card-${card.id}`;
   return (
-    <div className="dwp3d-panel dwp3d-card" title={title} style={accent ? { '--dwp3d-c': accent } : undefined}>
+    <div
+      className="dwp3d-panel dwp3d-card"
+      title={title}
+      style={accent ? { '--dwp3d-c': accent } : undefined}
+      tabIndex={0}
+      aria-describedby={descId}
+      onPointerDown={(e) => {
+        touchRef.current = e.pointerType !== 'mouse';
+      }}
+      onFocus={(e) => {
+        if (touchRef.current || focusVisible(e.currentTarget)) onTip(card.id, e.currentTarget);
+      }}
+      onBlur={() => onTip(null)}
+    >
+      <span id={descId} className="dwp3d-sr">{title}</span>
       <div className="k">{card.k}</div>
       <div className="v" key={bump} data-bump={bump ? '' : undefined}>
         {card.v}
@@ -576,6 +647,10 @@ export function ProcessView(props) {
   const [error, setError] = useState(null);
   const [renderWarn, setRenderWarn] = useState(null);
   const [toast, setToast] = useState(null);
+  const [cardTip, setCardTip] = useState(null);
+  const [lostLong, setLostLong] = useState(false);
+  const displayBtnRef = useRef(null);
+  const popRef = useRef(null);
 
   // Data source. Live data comes from this plugin's Host projection; a DSH without the
   // projection hook (or one whose hook fails) can only show the demo.
@@ -717,10 +792,11 @@ export function ProcessView(props) {
     if (typeof console !== 'undefined') console.warn('[dsh-work-process-3d] live data unavailable:', err);
   }, []);
 
-  const chooseSource = useCallback((next) => {
+  // Only the 显示 → 数据 switch is remembered; "show the demo for now" lasts for this view.
+  const chooseSource = useCallback((next, remember = true) => {
     if (next !== 'live' && next !== 'demo') return;
     setSource(next);
-    writeStored(SOURCE_KEY, next === 'demo' ? 'demo' : null);
+    if (remember) writeStored(SOURCE_KEY, next === 'demo' ? 'demo' : null);
   }, []);
 
   // Scene lifecycle; Retry remounts by bumping mountKey. The data feed below fills it.
@@ -800,6 +876,8 @@ export function ProcessView(props) {
             setScreenId(id);
             if (id) setHover(null);
           },
+          // Dragging, zooming or walking leaves the preset, so no view button stays pressed.
+          onUserCamera: () => setView(null),
         });
       } catch (err) {
         while (stage.firstChild) stage.removeChild(stage.firstChild);
@@ -937,6 +1015,26 @@ export function ProcessView(props) {
     return () => document.removeEventListener('fullscreenchange', onChange);
   }, []);
 
+  // 显示 moves the focus into its first control, so Tab walks through the popover next.
+  useEffect(() => {
+    if (!displayOpen || !popRef.current) return;
+    const first = popRef.current.querySelector('button:not([disabled]), input:not([disabled]), select:not([disabled])');
+    try {
+      if (first) first.focus({ preventScroll: true });
+    } catch {
+      /* focus is best effort */
+    }
+  }, [displayOpen]);
+
+  // A lost GPU context that does not come back gets a reload button after a few seconds.
+  const lostNow = !!error && error.kind === 'lost';
+  useEffect(() => {
+    setLostLong(false);
+    if (!lostNow) return undefined;
+    const id = setTimeout(() => setLostLong(true), LOST_WAIT_MS);
+    return () => clearTimeout(id);
+  }, [lostNow]);
+
   const focusStage = () => {
     try {
       if (stageRef.current) stageRef.current.focus({ preventScroll: true });
@@ -944,14 +1042,29 @@ export function ProcessView(props) {
       /* focus is best effort */
     }
   };
+  // Toolbar clicks take the focus; in Roam and the close-up the keys belong to the stage.
+  const keepKeys = () => {
+    const scene = sceneRef.current;
+    const mode = scene ? scene.getMode() : camMode;
+    if (mode === 'look' || mode === 'screen') focusStage();
+  };
   const goView = (v) => {
     const scene = sceneRef.current;
     if (!scene) return;
+    const before = scene.getMode();
     scene.setCameraPreset(v);
     setView(v);
     setFollow(false);
+    // A preset that changes the camera mode (the balcony roams) says so.
+    const after = scene.getMode();
+    if (after !== before && (after === 'look' || after === 'orbit')) showToast(t(after === 'look' ? 'mode.toLook' : 'mode.toOrbit'));
     // Roaming presets (the balcony) walk with the keyboard right away.
-    if (scene.getMode() === 'look') focusStage();
+    if (after === 'look') focusStage();
+  };
+  // Narrow tabs pick the view from a list instead of a row of buttons.
+  const onViewSelect = (value) => {
+    if (value === 'screens') toggleScreens();
+    else if (VIEWS.includes(value)) goView(value);
   };
   // 大屏 toggles the media-wall close-up; ← / → in it need the stage focus.
   const toggleScreens = () => {
@@ -968,15 +1081,63 @@ export function ProcessView(props) {
   };
   const stepScreen = (dir) => {
     if (sceneRef.current) sceneRef.current.stepScreen(dir);
+    focusStage(); // ← / → keep working after a click on ◀ / ▶
   };
   const exitScreen = () => {
-    if (sceneRef.current) sceneRef.current.exitScreen();
+    const scene = sceneRef.current;
+    if (!scene) return;
+    scene.exitScreen();
+    keepKeys();
   };
   const toggleFollow = () => {
+    const scene = sceneRef.current;
     const next = !follow;
-    setFollow(next);
-    if (sceneRef.current) sceneRef.current.setFollow(next);
+    // setFollow may leave the close-up or Roam first (which reports follow off); read it back.
+    if (scene) scene.setFollow(next);
+    setFollow(scene && typeof scene.getFollow === 'function' ? scene.getFollow() : next);
   };
+  const toggleLabels = () => {
+    setLabelsOn((v) => !v);
+    keepKeys();
+  };
+  const togglePanels = () => {
+    setPanelsOn((v) => !v);
+    keepKeys();
+  };
+  const closeDisplay = (refocus) => {
+    setDisplayOpen(false);
+    if (!refocus || !displayBtnRef.current) return;
+    try {
+      displayBtnRef.current.focus({ preventScroll: true });
+    } catch {
+      /* focus is best effort */
+    }
+  };
+  // Esc closes 显示 first, then leaves the screen close-up; every other key passes through.
+  const onRootKeyDown = (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (displayOpen) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeDisplay(true);
+      return;
+    }
+    if (screenId && sceneRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      exitScreen();
+    }
+  };
+  const onCardTip = useCallback((id, el) => {
+    const root = rootRef.current;
+    if (!id || !el || !root) {
+      setCardTip(null);
+      return;
+    }
+    const r = el.getBoundingClientRect();
+    const R = root.getBoundingClientRect();
+    setCardTip({ id, x: r.left - R.left + r.width / 2, y: r.top - R.top });
+  }, []);
   const toggleFullscreen = () => {
     const el = rootRef.current;
     if (!el) return;
@@ -1041,6 +1202,15 @@ export function ProcessView(props) {
       setHintOn(false);
     }
   };
+  // 显示 → 操作提示 brings dismissed hints back (or hides both).
+  const hintsShown = camMode === 'look' ? lookHintOn : hintOn;
+  const toggleHints = () => {
+    const next = !hintsShown;
+    writeStored(HINT_KEY, next ? null : 'off');
+    writeStored(LOOK_HINT_KEY, next ? null : 'off');
+    setHintOn(next);
+    setLookHintOn(next);
+  };
   const chooseMode = (m) => {
     const scene = sceneRef.current;
     if (!scene) return;
@@ -1080,7 +1250,7 @@ export function ProcessView(props) {
       s: affordable ? t('m.balanceSub', { tokens: formatTokens(affordable) }) : '',
       title: !demoOn && balance != null && live.toppedUp != null
         ? t('m.balanceTitle', { topped: formatMoney(live.toppedUp, currency), granted: formatMoney(live.granted || 0, currency) })
-        : undefined,
+        : balanceHelp(t, balance, live.balanceStatus, demoOn) || undefined,
     },
     {
       id: 'context',
@@ -1143,7 +1313,7 @@ export function ProcessView(props) {
   ];
   const recent = s.calls.slice(-5).reverse();
   const dockInfo = hover && hover.id === 'dock' && sceneRef.current ? sceneRef.current.dockInfo() : null;
-  const tipData = { t, s, live, lang, price, peak, m, phase, balance, currency, demo: demoOn, dock: dockInfo };
+  const tipData = { t, s, live, lang, price, peak, m, phase, balance, currency, demo: demoOn, dock: dockInfo, cards };
   // Live status line under the title.
   const liveMissing = !demoOn && !liveSeen && liveWaited;
   const liveIdle = !demoOn && liveSeen && s.turnCount === 0 && !s.calls.length;
@@ -1153,7 +1323,7 @@ export function ProcessView(props) {
   const autoLabel = manual ? t('quality.autoPlain') : t('quality.autoOpt', { q: t('quality.' + quality) });
 
   return (
-    <div ref={rootRef} className={`dwp3d-root${failed ? ' fail' : ''}`}>
+    <div ref={rootRef} className={`dwp3d-root${failed ? ' fail' : ''}`} onKeyDown={onRootKeyDown}>
       <style>{CSS}</style>
       {!demoOn ? (
         <React.Fragment>
@@ -1178,7 +1348,7 @@ export function ProcessView(props) {
       {/* Focusable so the roaming camera can take WASD / arrow keys while the scene is focused. */}
       <div ref={stageRef} className="dwp3d-stage" tabIndex={0} role="application" aria-label={t('stage.label')} />
       {/* Clicking anywhere outside the display popover closes it. */}
-      {displayOpen ? <div className="dwp3d-backdrop" onPointerDown={() => setDisplayOpen(false)} /> : null}
+      {displayOpen ? <div className="dwp3d-backdrop" onPointerDown={() => closeDisplay(false)} /> : null}
 
       {hud ? (
         <div className="dwp3d-top">
@@ -1186,7 +1356,7 @@ export function ProcessView(props) {
             <div className="dwp3d-title-row">
               <h2>{t('title')}</h2>
               {demoOn
-                ? <span className="dwp3d-chip demo">{t('badge.demo')}</span>
+                ? <span className="dwp3d-chip demo" title={t('badge.demoHint')}>{t('badge.demo')}</span>
                 : <span className="dwp3d-chip live" title={t('badge.liveHint')}>{t('badge.live')}</span>}
               {s.model ? <span className="dwp3d-chip">{`${s.model}${s.effort ? ` · ${s.effort}` : ''}`}</span> : null}
               <span className="dwp3d-chip">
@@ -1194,11 +1364,21 @@ export function ProcessView(props) {
                 {`${t('phase.' + phase)}${tpsText}`}
               </span>
             </div>
-            {demoOn ? <p className="dwp3d-note">{t(liveCapable ? 'badge.demoHint' : probeFailed ? 'live.failed' : 'live.unsupported')}</p> : null}
+            {demoOn ? (
+              <p className="dwp3d-note">
+                {t(liveCapable ? 'badge.demoHint' : probeFailed ? 'live.failed' : 'live.unsupported')}
+                {liveCapable ? (
+                  <React.Fragment>
+                    {' '}
+                    <button type="button" className="dwp3d-link" onClick={() => chooseSource('live')}>{t('live.backToLive')}</button>
+                  </React.Fragment>
+                ) : null}
+              </p>
+            ) : null}
             {liveMissing ? (
               <p className="dwp3d-note dwp3d-warn" role="status">
                 {t('live.missing')}{' '}
-                <button type="button" className="dwp3d-link" onClick={() => chooseSource('demo')}>{t('live.showDemo')}</button>
+                <button type="button" className="dwp3d-link" onClick={() => chooseSource('demo', false)}>{t('live.showDemo')}</button>
               </p>
             ) : null}
             {liveIdle ? <p className="dwp3d-note">{t('live.idle')}</p> : null}
@@ -1206,11 +1386,31 @@ export function ProcessView(props) {
           </div>
           <div className="dwp3d-right">
           <div className="dwp3d-panel dwp3d-tools">
-            <div className="dwp3d-seg" role="group" aria-label={t('ctl.views')}>
+            {/* Narrow tabs: one list instead of the row of view buttons (CSS picks one). */}
+            <select
+              className="dwp3d-select dwp3d-viewsel"
+              aria-label={t('ctl.views')}
+              value={screenId ? 'screens' : !follow && view ? view : ''}
+              onChange={(e) => onViewSelect(e.target.value)}
+            >
+              <option value="" disabled>{t('ctl.viewPick')}</option>
+              {VIEWS.map((v) => (
+                <option key={v} value={v}>{t('view.' + v)}</option>
+              ))}
+              <option value="screens">{t('view.screens')}</option>
+            </select>
+            <div className="dwp3d-seg dwp3d-views" role="group" aria-label={t('ctl.views')}>
               {VIEWS.map((v) => {
                 const on = !follow && !screenId && view === v;
                 return (
-                  <button key={v} type="button" className={`dwp3d-btn${on ? ' on' : ''}`} aria-pressed={on} onClick={() => goView(v)}>
+                  <button
+                    key={v}
+                    type="button"
+                    className={`dwp3d-btn${on ? ' on' : ''}`}
+                    aria-pressed={on}
+                    title={v === 'balcony' ? t('view.balconyHint') : undefined}
+                    onClick={() => goView(v)}
+                  >
                     {t('view.' + v)}
                   </button>
                 );
@@ -1243,31 +1443,33 @@ export function ProcessView(props) {
               <button type="button" className={`dwp3d-btn${follow ? ' on' : ''}`} title={t('ctl.followHint')} aria-pressed={follow} onClick={toggleFollow}>
                 {t('ctl.follow')}
               </button>
-              <button type="button" className={`dwp3d-btn${labelsOn ? ' on' : ''}`} title={t('ctl.labelsHint')} aria-pressed={labelsOn} onClick={() => setLabelsOn((v) => !v)}>
+              <button type="button" className={`dwp3d-btn${labelsOn ? ' on' : ''}`} title={t('ctl.labelsHint')} aria-pressed={labelsOn} onClick={toggleLabels}>
                 {t('ctl.labels')}
               </button>
-              <button type="button" className={`dwp3d-btn${panelsOn ? ' on' : ''}`} title={t('ctl.panelsHint')} aria-pressed={panelsOn} onClick={() => setPanelsOn((v) => !v)}>
+              <button type="button" className={`dwp3d-btn${panelsOn ? ' on' : ''}`} title={t('ctl.panelsHint')} aria-pressed={panelsOn} onClick={togglePanels}>
                 {t('ctl.panels')}
               </button>
               <button
+                ref={displayBtnRef}
                 type="button"
                 className={`dwp3d-btn${displayOpen ? ' on' : ''}`}
                 title={t('ctl.displayHint')}
                 aria-expanded={displayOpen}
                 aria-haspopup="dialog"
-                onClick={() => setDisplayOpen((v) => !v)}
+                onClick={() => (displayOpen ? closeDisplay(false) : setDisplayOpen(true))}
               >
                 {t('ctl.display')}
               </button>
               {canFullscreen() ? (
-                <button type="button" className="dwp3d-btn" aria-pressed={fullscreen} onClick={toggleFullscreen}>
+                // The label says what a click does, so no pressed state on top of it.
+                <button type="button" className="dwp3d-btn" onClick={toggleFullscreen}>
                   {fullscreen ? t('ctl.exitFullscreen') : t('ctl.fullscreen')}
                 </button>
               ) : null}
             </div>
           </div>
           {displayOpen ? (
-            <div className="dwp3d-panel dwp3d-pop" role="dialog" aria-label={t('ctl.display')}>
+            <div ref={popRef} className="dwp3d-panel dwp3d-pop" role="dialog" aria-label={t('ctl.display')}>
               <div className="dwp3d-pop-row">
                 <span className="dwp3d-pop-k">{t('source.label')}</span>
                 <div className="dwp3d-seg" role="group" aria-label={t('source.label')}>
@@ -1281,7 +1483,7 @@ export function ProcessView(props) {
                         className={`dwp3d-btn${on ? ' on' : ''}`}
                         aria-pressed={on}
                         disabled={disabled}
-                        title={disabled ? t('live.unsupported') : t('source.' + id + 'Hint')}
+                        title={disabled ? t(probeFailed ? 'live.failed' : 'live.unsupported') : t('source.' + id + 'Hint')}
                         onClick={() => chooseSource(id)}
                       >
                         {t('source.' + id)}
@@ -1310,6 +1512,7 @@ export function ProcessView(props) {
                   max={BRIGHTNESS.max}
                   step={BRIGHTNESS.step}
                   value={brightness}
+                  aria-valuetext={`${Math.round(brightness * 100)}%`}
                   onChange={(e) => onBrightness(e.target.value)}
                 />
                 <b className="dwp3d-pop-v">{`${Math.round(brightness * 100)}%`}</b>
@@ -1345,6 +1548,10 @@ export function ProcessView(props) {
                 <input type="checkbox" checked={perfOn} onChange={togglePerf} />
                 <span>{t('ctl.perfShow')}</span>
               </label>
+              <label className="dwp3d-pop-row dwp3d-check" title={t('ctl.hintsHint')}>
+                <input type="checkbox" checked={hintsShown} onChange={toggleHints} />
+                <span>{t('ctl.hints')}</span>
+              </label>
             </div>
           ) : null}
           {perfOn ? <PerfPanel t={t} perf={perf} /> : null}
@@ -1371,13 +1578,16 @@ export function ProcessView(props) {
           </div>
           <div className="dwp3d-cards">
             {cards.map((c) => (
-              <Card key={c.id} card={c} />
+              <Card key={c.id} card={c} uid={uid} onTip={onCardTip} />
             ))}
           </div>
         </div>
       ) : null}
 
       {hud && hover && !screenId ? <Tooltip hover={hover} data={tipData} rootRef={rootRef} /> : null}
+      {hud && cardTip && !hover && panelsOn && !screenId ? (
+        <Tooltip hover={{ id: `card:${cardTip.id}`, x: cardTip.x, y: cardTip.y }} data={tipData} rootRef={rootRef} />
+      ) : null}
 
       {loading && !error ? (
         <div className="dwp3d-center">
@@ -1400,9 +1610,16 @@ export function ProcessView(props) {
         </div>
       ) : null}
 
-      {error && error.kind === 'lost' ? (
+      {lostNow ? (
         <div className="dwp3d-center dim" role="alert">
-          <div className="dwp3d-panel dwp3d-msg">{t('error.lost')}</div>
+          <div className="dwp3d-panel dwp3d-msg">
+            <p>{t('error.lost')}</p>
+            {lostLong ? (
+              <button type="button" className="dwp3d-btn on" onClick={retry}>
+                {t('error.reload')}
+              </button>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </div>

@@ -66,10 +66,12 @@ function trimReflection(scene, minRadius) {
 
 const NICE = [10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
 
-// Fuel readout note under "— —" when no balance is known (live.balanceStatus).
+// Fuel readout note under "— —" when no balance is known (live.balanceStatus). Bilingual like
+// every other in-scene plate; the HUD card and tooltip explain the next step in the UI language.
 const BALANCE_NOTES = {
   loading: '读取中 · loading',
   'signed-out': '未登录账户 · not signed in',
+  'no-host': '重启 DSH 后显示 · restart DSH',
   failed: '查询失败 · query failed',
   unavailable: '余额不可用 · balance unavailable',
 };

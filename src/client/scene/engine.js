@@ -356,6 +356,8 @@ export function buildEngine(M0) {
   const st = { rotorSpeed: 0.4, rotorAngle: 0, ctx: 0, tach: 0, disp: [0, 0, 0, 0, 0], dispPulse: 0, err: 0 };
   const coreColor = new THREE.Color();
   const COLORS = {
+    // Thinking (waiting for the first token) shares the console's violet chip with reasoning.
+    thinking: new THREE.Color(0x7d63ff),
     reasoning: new THREE.Color(0x9b6bff),
     generating: new THREE.Color(0x3f7bff),
     tool: new THREE.Color(0xffa21f),

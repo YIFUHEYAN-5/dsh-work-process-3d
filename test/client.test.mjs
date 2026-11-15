@@ -121,8 +121,9 @@ test('fetchBalance posts the client metadata and maps every outcome', async () =
   assert.equal(body.version, '0.2.2');
   assert.equal(body.locale, 'zh-CN');
   assert.ok(Number.isInteger(body.timezoneOffsetSeconds));
+  // 404: the route is missing because the plugin's Host part has not loaded yet (restart DSH).
   r = await fetchBalance({ version: '', fetchImpl: reply(404, null) });
-  assert.equal(r.status, 'unavailable');
+  assert.equal(r.status, 'no-host');
   r = await fetchBalance({ version: '', fetchImpl: reply(502, { ok: false, error: { code: 'upstream', message: 'x' } }) });
   assert.equal(r.status, 'failed');
   r = await fetchBalance({ version: '', fetchImpl: async () => ({ status: 200, json: async () => { throw new SyntaxError('bad'); } }) });

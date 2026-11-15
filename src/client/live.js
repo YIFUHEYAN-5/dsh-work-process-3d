@@ -127,6 +127,7 @@ export function withContext(view, pressure) {
 }
 
 const NO_BALANCE = { balance: null, currency: 'CNY', toppedUp: null, granted: null, source: null };
+// 'no-host' never comes from the route itself: fetchBalance() reports it when the route is missing.
 const STATUSES = new Set(['ready', 'failed', 'signed-out', 'unavailable']);
 
 /** Reply of the host balance route → { status, balance, currency, toppedUp, granted, source }. */
@@ -178,7 +179,7 @@ export async function fetchBalance({ lang = 'en', version = bootVersion(), fetch
     return { status: 'failed', ...NO_BALANCE };
   }
   // No route: the plugin's Host part is not running (older DSH, or not restarted yet).
-  if (res.status === 404) return { status: 'unavailable', ...NO_BALANCE };
+  if (res.status === 404) return { status: 'no-host', ...NO_BALANCE };
   let json = null;
   try {
     json = await res.json();

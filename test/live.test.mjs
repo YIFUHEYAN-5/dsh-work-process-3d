@@ -402,6 +402,12 @@ test('the balance route falls back to the API key without leaking it', async () 
   assert.equal(nv.source, 'api-key');
   assert.equal(account.calls.length, 0);
 
+  // Signed out and no key: say so instead of a bare "unavailable" (the page offers both fixes).
+  const signedOutOnly = fakeAccount(null, 'signed-out');
+  const lonely = createBalanceHandler({ account: () => signedOutOnly });
+  assert.deepEqual(await (await lonely(post(META))).json().then((x) => [x.status, x.source, x.wallets]), ['signed-out', null, []]);
+  assert.equal(signedOutOnly.calls.length, 0, 'still not queried');
+
   // A failed account query still reports failure when no key exists.
   const failing = createBalanceHandler({ account: () => fakeAccount({ status: 'failed' }) });
   assert.deepEqual(await (await failing(post(META))).json().then((x) => [x.status, x.source]), ['failed', 'account']);

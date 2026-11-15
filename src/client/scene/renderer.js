@@ -150,17 +150,21 @@ function createGpuTimer(gl) {
  * Mount the factory into `container` (which must be position: relative and sized).
  * opts: { quality ('auto' | tier), fps ('auto' | 30 | 60 | 120 | 0), demo, look ('dusk' | 'day'),
  *         brightness (0.6..1.6), onHover, onSelect, onPerf, onError, onFocus, onActive, onReady,
- *         onMode(mode), onScreen(id | null) }.
- * onMode reports 'orbit', 'look' or 'screen'; onScreen the media-wall screen in close-up.
+ *         onMode(mode), onScreen(id | null), onUserCamera() }.
+ * onMode reports 'orbit', 'look' or 'screen'; onScreen the media-wall screen in close-up;
+ * onUserCamera fires when the user starts moving the camera (drag, wheel, keys).
  * onPerf receives once per second: { fps, target, slow, scale, minScale, cpuMs, gpuMs, calls, triangles, width, height, cap }.
  * The container receives keyboard focus for the roaming camera, so give it a tabIndex.
  * Returns a controller; call dispose() when the view unmounts.
  */
 export function createFactoryScene(container, opts = {}) {
-  const { onHover, onSelect, onPerf, onError, onFocus, onActive, onReady, onMode, onScreen } = opts;
+  const { onHover, onSelect, onPerf, onError, onFocus, onActive, onReady, onMode, onScreen, onUserCamera } = opts;
   let demo = !!opts.demo;
-  const reduceMotion = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
-    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Reduced motion follows the system setting live: flights and walks jump, Follow cuts, grain stands still.
+  const motionQuery = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)')
+    : null;
+  let reduceMotion = !!(motionQuery && motionQuery.matches);
 
   // 'default' lets dual-GPU laptops stay on the integrated GPU; the quality tiers, dynamic
   // resolution and the automatic downgrade keep the frame rate acceptable there.
@@ -366,7 +370,8 @@ export function createFactoryScene(container, opts = {}) {
   function applyPost() {
     if (!post || !world) return;
     if (world.post) post.set(world.post);
-    if (reduceMotion) post.set({ grain: 0.006 });
+    // Reduced motion renders a still, fainter grain (post.render gets time 0).
+    post.set({ grain: reduceMotion ? 0.006 : 0.012 });
   }
 
   // ── Orbit limits ─────────────────────────────────────────────
@@ -700,6 +705,10 @@ export function createFactoryScene(container, opts = {}) {
   const touch = () => {
     lastInteract = performance.now();
   };
+  /** The user moved the camera, so the view no longer matches a preset. */
+  const userCamera = () => {
+    if (onUserCamera) onUserCamera();
+  };
   /**
    * The user grabbed the camera mid-flight: keep the current view and hand it to the active
    * controller (orbit around the point straight ahead, or roam from here).
@@ -720,6 +729,7 @@ export function createFactoryScene(container, opts = {}) {
   controls.addEventListener('start', () => {
     interruptTween();
     touch();
+    userCamera();
   });
   controls.addEventListener('change', touch);
   controls.addEventListener('end', touch);
@@ -731,9 +741,11 @@ export function createFactoryScene(container, opts = {}) {
     keyTarget: container,
     clampPosition: (v, prev) => camspace.resolve(v, prev),
     floorY: 0,
+    reducedMotion: () => reduceMotion,
     onStart: () => {
       interruptTween();
       touch();
+      userCamera();
     },
     onChange: touch,
   });
@@ -912,6 +924,7 @@ export function createFactoryScene(container, opts = {}) {
     if (!step) return;
     interruptTween();
     touch();
+    userCamera();
     if (zoom.log && Math.sign(step) !== Math.sign(zoom.log)) zoom.log = 0;
     if (step < 0) {
       adoptView();
@@ -1149,14 +1162,17 @@ export function createFactoryScene(container, opts = {}) {
         }
       }
       _off.subVectors(camera.position, controls.target);
-      controls.target.lerp(focusPt, 1 - Math.exp(-2.4 * dt));
+      // Reduced motion cuts straight to each new station instead of panning and zooming.
+      controls.target.lerp(focusPt, reduceMotion ? 1 : 1 - Math.exp(-2.4 * dt));
       if (followZoom > 0) {
         followZoom -= dt;
         if (!overviewDist) {
           const o = presetPose('overview');
           overviewDist = o.pos.distanceTo(o.target);
         }
-        _off.setLength(damp(_off.length(), focusId ? 6.8 : overviewDist, 2, dt));
+        const wantDist = focusId ? 6.8 : overviewDist;
+        _off.setLength(reduceMotion ? wantDist : damp(_off.length(), wantDist, 2, dt));
+        if (reduceMotion) followZoom = 0;
       }
       camera.position.copy(controls.target).add(_off);
     }
@@ -1258,6 +1274,16 @@ export function createFactoryScene(container, opts = {}) {
   canvas.addEventListener('webglcontextlost', onLost);
   canvas.addEventListener('webglcontextrestored', onRestored);
 
+  const onMotionPref = (e) => {
+    reduceMotion = !!e.matches;
+    applyPost();
+    touch();
+  };
+  if (motionQuery) {
+    if (typeof motionQuery.addEventListener === 'function') motionQuery.addEventListener('change', onMotionPref);
+    else if (typeof motionQuery.addListener === 'function') motionQuery.addListener(onMotionPref);
+  }
+
   function destroy() {
     if (disposed) return;
     disposed = true;
@@ -1274,6 +1300,10 @@ export function createFactoryScene(container, opts = {}) {
     canvas.removeEventListener('webglcontextrestored', onRestored);
     container.removeEventListener('wheel', onWheel, { capture: true });
     container.removeEventListener('keydown', onKey);
+    if (motionQuery) {
+      if (typeof motionQuery.removeEventListener === 'function') motionQuery.removeEventListener('change', onMotionPref);
+      else if (typeof motionQuery.removeListener === 'function') motionQuery.removeListener(onMotionPref);
+    }
     controls.dispose();
     roam.dispose();
     try {
@@ -1396,6 +1426,8 @@ export function createFactoryScene(container, opts = {}) {
       focusTimer = 0;
       if (follow) tween = null;
     },
+    /** Whether the camera follows the working station (setFollow may change modes first). */
+    getFollow: () => follow,
     /** Labels: [{ id, text, sub }] anchored to scene objects. */
     setLabels(list) {
       labelSpec = Array.isArray(list) ? list : [];

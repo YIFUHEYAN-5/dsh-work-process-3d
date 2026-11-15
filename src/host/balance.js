@@ -127,18 +127,22 @@ async function apiKeyBalance(deps) {
   }
 }
 
+/**
+ * Balance of the signed-in DeepSeek account: null when there is no account service or no DSH
+ * version to send; { status: 'signed-out' } without querying when nobody is signed in.
+ */
 async function accountBalance(deps, meta) {
   const account = deps.account();
-  if (!account || typeof account.getBalance !== 'function' || !meta.version) return null;
+  if (!account || typeof account.getBalance !== 'function') return null;
   try {
     const view = typeof account.getState === 'function' ? account.getState() : null;
-    if (view && view.status === 'signed-out') return null;
+    if (view && view.status === 'signed-out') return { status: 'signed-out', wallets: [] };
   } catch {
     // An unreadable state is not a reason to skip the query.
   }
+  if (!meta.version) return null;
   try {
-    const r = fromAccount(await account.getBalance(meta));
-    return r.status === 'signed-out' ? null : r;
+    return fromAccount(await account.getBalance(meta));
   } catch {
     return { status: 'failed', wallets: [] };
   }
@@ -166,7 +170,8 @@ export function createBalanceHandler(deps, { now = () => Date.now(), ttl = BALAN
     if (fromAcct && fromAcct.status === 'ready') return { ...fromAcct, source: 'account' };
     const fromKey = await apiKeyBalance(d);
     if (fromKey) return { ...fromKey, source: 'api-key' };
-    if (fromAcct) return { ...fromAcct, source: 'account' };
+    // Signed out and no API key: the page tells the user how to get a balance.
+    if (fromAcct) return { ...fromAcct, source: fromAcct.status === 'signed-out' ? null : 'account' };
     return { status: 'unavailable', wallets: [], source: null };
   }
 
