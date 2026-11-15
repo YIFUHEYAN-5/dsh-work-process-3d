@@ -138,7 +138,8 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
     { id: 'tank', anchor: fuel.anchors.tank },
     { id: 'engine', anchor: engine.anchors.engine },
     { id: 'robot', anchor: cell.anchors.robot.clone().setY(1.75) },
-    ...stations.list.map((s) => ({ id: `station:${s.kind}`, anchor: s.anchor })),
+    // Up close the station's own holo readout says the same, so its label steps aside.
+    ...stations.list.map((s) => ({ id: `station:${s.kind}`, anchor: s.anchor, accent: s.accent, near: 6.5 })),
     { id: 'loadport', anchor: stocker.anchors.loadPort.clone().setY(1.55) },
     { id: 'stocker', anchor: stocker.anchors.stocker.clone().setY(1.25) },
     { id: 'dock', anchor: dock.labelAnchor },
@@ -242,6 +243,7 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
       state = next;
       director.sync(next);
       dock.sync(next.agents, next.workflows);
+      stations.setStats(next);
       readoutT = Math.max(readoutT, 0.45);
     },
     setLive(next) {
@@ -264,8 +266,19 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
       maxBalance = 0;
       director.reset();
       dock.reset();
+      stations.setStats(null);
       screens.reset();
       readoutT = 1;
+    },
+    /** Live state of a labelled machine for its label dot: 'working', 'error' or ''. */
+    labelState(id) {
+      if (id.startsWith('station:')) {
+        const s = stations.byKind[id.slice(8)];
+        const v = s ? s.status() : 'idle';
+        return v === 'idle' ? '' : v;
+      }
+      if (id === 'dock') return dock.counts().running > 0 ? 'working' : '';
+      return '';
     },
     /** True while something animates that deserves the higher frame rate. */
     busy() {
@@ -303,6 +316,7 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
       director.update(dt, t);
       fx.update(dt);
       dock.update(dt, t, camera);
+      if (camera) stations.face(camera);
       living.update(dt, t);
       updateChannels(dt, flow, phase);
       screenInfo.state = state;

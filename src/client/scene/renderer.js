@@ -758,8 +758,10 @@ export function createFactoryScene(container, opts = {}) {
         sub.textContent = spec.sub;
         el.appendChild(sub);
       }
+      if (a.accent) el.style.setProperty('--dwp3d-accent', a.accent);
       labelLayer.appendChild(el);
-      labels.push({ id: spec.id, el, anchor: a.anchor, shown: null, tf: '', w: 0, h: 0, sx: 0, sy: 0, dist: 0 });
+      // `near`: closer than this the machine's own readout takes over and the label steps aside.
+      labels.push({ id: spec.id, el, anchor: a.anchor, near: a.near || 2.5, state: '', shown: null, tf: '', w: 0, h: 0, sx: 0, sy: 0, dist: 0 });
     }
   }
   const pv = new THREE.Vector3();
@@ -783,6 +785,10 @@ export function createFactoryScene(container, opts = {}) {
       l.sx = (pv.x * 0.5 + 0.5) * width;
       l.sy = (-pv.y * 0.5 + 0.5) * height;
       l.dist = viewCam.position.distanceTo(l.anchor);
+      if (l.dist < l.near) {
+        hideLabel(l);
+        continue;
+      }
       candidates.push(l);
     }
     // Nearest first; a label that would overlap a nearer one stays hidden.
@@ -799,6 +805,12 @@ export function createFactoryScene(container, opts = {}) {
         continue;
       }
       placed.push(r);
+      const state = world && world.labelState ? world.labelState(l.id) : '';
+      if (state !== l.state) {
+        l.state = state;
+        if (state) l.el.dataset.state = state;
+        else delete l.el.dataset.state;
+      }
       const op = clamp(1.45 - l.dist / 24, 0.3, 1).toFixed(2);
       const tf = `translate(${l.sx.toFixed(1)}px, ${l.sy.toFixed(1)}px) translate(-50%, -100%)`;
       if (tf !== l.tf) {

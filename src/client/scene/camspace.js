@@ -169,7 +169,9 @@ export function solidsFromScene(root) {
       const inv = new THREE.Matrix4().copy(o.matrixWorld).invert();
       const box = new THREE.Box3();
       o.traverse((c) => {
-        if (!c.isMesh || !c.geometry || c.isInstancedMesh) return;
+        // Holograms opt out with userData.noSolid; additive light (beams, glows) is not matter.
+        if (!c.isMesh || !c.geometry || c.isInstancedMesh || c.userData.noSolid) return;
+        if (c.material && c.material.blending === THREE.AdditiveBlending) return;
         if (!c.geometry.boundingBox) c.geometry.computeBoundingBox();
         m.multiplyMatrices(inv, c.matrixWorld);
         tmp.copy(c.geometry.boundingBox).applyMatrix4(m);

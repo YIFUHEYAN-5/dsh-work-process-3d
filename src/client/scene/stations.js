@@ -1,8 +1,8 @@
 // Ten tool stations on the ring around the transfer robot. Each one acts out what its DSH tools do.
 import * as THREE from 'three';
 import { Kit, mesh, group, cyl, rbox, box, lathe, torus, tf, damp, clamp, smooth, TAU, DEG, canvasTexture, FONT_SANS, FONT_MONO, pipeGeometry } from './util.js';
-import { ledMaterial, screenMaterial, plateMaterial } from './materials.js';
-import { nameplate, textScreen, crtScreen, kanbanFace, gaugeFace } from './displays.js';
+import { ledMaterial, screenMaterial, plateMaterial, fakeGlass } from './materials.js';
+import { nameplate, crtScreen, kanbanFace, gaugeFace, roundRect, fitText } from './displays.js';
 import { blobShadow } from './environment.js';
 import { RING_R, PORT_R, WAFER_Y, ringPos, yawFacingHub, buildPedestal } from './cell.js';
 import { STATION_ORDER, STATION_INFO } from '../../model/stations.js';
@@ -12,10 +12,8 @@ const PORT_Z = RING_R - PORT_R;
 const DECK = 0.89;
 const ACCENT = {
   archive: '#4d6bfe', engraver: '#ff7a1f', terminal: '#2fbf71', satellite: '#7c5cff', robot: '#4d6bfe',
-  press: '#e5484d', kanban: '#2f9e6b', beacon: '#f5a524', labeler: '#d4a72c', generic: '#6b7280',
+  press: '#e5484d', kanban: '#2f9e6b', beacon: '#f5a524', labeler: '#d4a72c', generic: '#3fb8d9',
 };
-
-const TOWER = { archive: [0.46, 0.17], press: [-0.44, 0.17] };
 
 const glow = (color, opacity = 0.6) =>
   new THREE.MeshBasicMaterial({ color, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false });
@@ -139,10 +137,8 @@ function buildEngraver(M, g, k, fx) {
   k.add('aluDark', tf(box(0.84, 0.09, 0.11), [0, 1.44, PORT_Z]));
   k.add('chrome', tf(box(0.76, 0.016, 0.016), [0, 1.44, PORT_Z + 0.062]));
   k.add('hazard', tf(box(0.84, 0.02, 0.112), [0, 1.494, PORT_Z]));
-  const shield = new THREE.MeshPhysicalMaterial({
-    color: 0xff6a00, emissive: 0xff4a00, emissiveIntensity: 0.06, transparent: true, opacity: 0.3,
-    roughness: 0.08, metalness: 0, side: THREE.DoubleSide, depthWrite: false,
-  });
+  // Laser-safety glass: clear while idle, it glows amber while the beam is on.
+  const shield = fakeGlass({ color: 0xdfe6f0, opacity: 0.1, fresnel: 0.45, side: THREE.DoubleSide, emissive: 0xff7a1f, emissiveIntensity: 0.06 });
   for (const x of [-0.335, 0.335]) g.add(mesh(new THREE.PlaneGeometry(0.5, 0.42), shield, [x, 1.17, PORT_Z], [0, Math.PI / 2, 0], null, { cast: false, receive: false }));
   const head = group('laser-head', [0, 1.44, PORT_Z]);
   g.add(head);
@@ -185,12 +181,13 @@ function buildEngraver(M, g, k, fx) {
 }
 
 function buildTerminal(M, g, k) {
-  k.add('ceramic', tf(rbox(0.52, 0.42, 0.36, 0.03), [-0.12, DECK + 0.27, -0.34]));
-  k.add('ceramic', tf(rbox(0.4, 0.32, 0.18, 0.04), [-0.12, DECK + 0.27, -0.5]));
-  k.add('graphite', tf(rbox(0.3, 0.06, 0.24, 0.01), [-0.12, DECK + 0.03, -0.34]));
-  k.add('graphite', tf(rbox(0.48, 0.36, 0.01, 0.02), [-0.12, DECK + 0.27, -0.158]));
+  // Slim console display on a titanium stand (it used to be a beige CRT box).
+  k.add('graphite', tf(rbox(0.24, 0.012, 0.16, 0.006), [-0.12, DECK + 0.006, -0.36]));
+  k.add('graphite', tf(box(0.05, 0.16, 0.03), [-0.12, DECK + 0.09, -0.38]));
+  k.add('white', tf(rbox(0.56, 0.36, 0.034, 0.012), [-0.12, DECK + 0.33, -0.36]));
+  k.add('visor', tf(box(0.52, 0.32, 0.006), [-0.12, DECK + 0.33, -0.3405]));
   const crt = crtScreen();
-  g.add(mesh(new THREE.PlaneGeometry(0.4, 0.3), screenMaterial(crt.tex, 1.5), [-0.12, DECK + 0.27, -0.151], null, null, { cast: false }));
+  g.add(mesh(new THREE.PlaneGeometry(0.48, 0.29), screenMaterial(crt.tex, 1.5), [-0.12, DECK + 0.33, -0.337], null, null, { cast: false }));
   k.add('plastic', tf(rbox(0.46, 0.03, 0.16, 0.008), [-0.1, DECK + 0.015, 0.1]));
   g.add(mesh(new THREE.PlaneGeometry(0.44, 0.14), plateMaterial(keyboardTexture().tex, 0.1), [-0.1, DECK + 0.031, 0.1], [-Math.PI / 2, 0, 0], null, { cast: false }));
   sideFrame(k);
@@ -472,7 +469,8 @@ function buildBeacon(M, g, k) {
   k.add('graphite', tf(cyl(0.07, 0.08, 0.04, 28), [X, DECK + 0.02, Z]));
   k.add('alu', tf(cyl(0.028, 0.028, 1.0, 16), [X, DECK + 0.5, Z]));
   k.add('graphite', tf(cyl(0.09, 0.1, 0.06, 32), [X, DECK + 1.03, Z]));
-  const domeMat = new THREE.MeshPhysicalMaterial({ color: 0xffa21f, emissive: 0xff8a00, emissiveIntensity: 0.1, transparent: true, opacity: 0.55, roughness: 0.15, depthWrite: false });
+  // Clear glass dome; the amber comes from the lamp inside while the agent waits for an answer.
+  const domeMat = fakeGlass({ color: 0xffe7c4, opacity: 0.14, fresnel: 0.5, emissive: 0xff9a2e, emissiveIntensity: 0.1 });
   g.add(mesh(cyl(0.08, 0.08, 0.13, 32, true), domeMat, [X, DECK + 1.125, Z], null, null, { cast: false }));
   g.add(mesh(new THREE.SphereGeometry(0.08, 32, 12, 0, TAU, 0, Math.PI / 2), domeMat, [X, DECK + 1.19, Z], null, null, { cast: false }));
   const spin = group('spin', [X, DECK + 1.12, Z]);
@@ -486,13 +484,13 @@ function buildBeacon(M, g, k) {
   cone.rotateX(-Math.PI / 2);
   spin.add(mesh(cone, beamMat, [0, 0, 0], [0, 0, 0], null, { cast: false, receive: false }));
   // Call box on the deck front.
-  const yellow = new THREE.MeshPhysicalMaterial({ color: 0xf2c230, roughness: 0.4, clearcoat: 0.5 });
   k.add('callbox', tf(rbox(0.36, 0.28, 0.12, 0.02), [-0.2, DECK + 0.14, 0.04]));
+  k.add('orange', tf(box(0.3, 0.008, 0.004), [-0.2, DECK + 0.255, 0.101]));
   k.add('grille', tf(new THREE.PlaneGeometry(0.12, 0.12), [-0.28, DECK + 0.15, 0.101]));
   k.add('steel', tf(cyl(0.045, 0.045, 0.02, 28), [-0.1, DECK + 0.15, 0.11], [Math.PI / 2, 0, 0]));
   const button = ledMaterial(0x34d17a, 0.3);
   g.add(mesh(new THREE.SphereGeometry(0.038, 24, 10, 0, TAU, 0, Math.PI / 2), button, [-0.1, DECK + 0.15, 0.12], [Math.PI / 2, 0, 0], null, { cast: false }));
-  k.extra = { callbox: yellow };
+  k.extra = { callbox: M.white };
   return {
     update(dt, t, s) {
       const w = s.work;
@@ -597,38 +595,133 @@ const BUILDERS = {
   generic: buildGeneric,
 };
 
+// ------------------------------------------------------------ atrium palette
+/**
+ * The modules were first drawn in a workshop palette: orange shields, a blue press, hazard
+ * stripes and rubber hoses. In the white atrium they use the hall's language instead: pearl
+ * ceramic shells, titanium trim and thin lines of the station's accent light. Builders get
+ * this remapped library in place of M, so their material keys need no edits.
+ */
+function stationPalette(M, kind) {
+  const accent = ledMaterial(ACCENT[kind], 1.1);
+  return {
+    ...M,
+    blue: M.white,
+    ceramic: M.white,
+    orange: accent,
+    hazard: accent,
+    rubber: M.graphite,
+    darkSteel: M.graphite,
+    aluDark: M.graphite,
+    steel: M.graphite,
+    plastic: M.graphite,
+    visor: M.plastic,
+    seam: ledMaterial(ACCENT[kind], 1.8),
+  };
+}
+
+// ------------------------------------------------------------ holographic readout
+const HOLO_PX = [384, 144];
+const HOLO_W = 0.66;
+const HOLO_H = (HOLO_W * HOLO_PX[1]) / HOLO_PX[0];
+/** Centre height of the readouts: clear of the tallest module (the beacon dome, ≈2.16 m). */
+export const HOLO_Y = 2.3;
+const HISTORY_MAX = 8;
+const HOLO_STATUS = {
+  idle: ['待机', 'IDLE', '#7fe0a8'],
+  working: ['运行', 'RUN', '#8fb4ff'],
+  error: ['故障', 'FAULT', '#ff8a80'],
+};
+const HISTORY_COLOR = { ok: '#34d17a', error: '#ff5a4f', running: '#6f9bff' };
+
+/** Dark glass panel in the RB-1 holo style: code, name, status, current call, recent outcomes. */
+function drawHolo(g, w, h, info, accent, d) {
+  g.clearRect(0, 0, w, h);
+  g.fillStyle = 'rgba(5, 12, 24, 0.84)';
+  roundRect(g, 3, 3, w - 6, h - 6, 16);
+  g.fill();
+  g.lineWidth = 2;
+  g.strokeStyle = accent;
+  g.globalAlpha = 0.75;
+  g.stroke();
+  g.globalAlpha = 1;
+  g.fillStyle = accent;
+  roundRect(g, 16, 22, 5, h - 44, 2.5);
+  g.fill();
+  g.textBaseline = 'middle';
+  const [zh, en, color] = HOLO_STATUS[d.status] || HOLO_STATUS.idle;
+  g.font = `700 19px ${FONT_MONO}`;
+  const chip = `${zh} ${en}`;
+  const cw = g.measureText(chip).width + 22;
+  const cx = w - 18 - cw;
+  g.fillStyle = color;
+  g.globalAlpha = 0.16;
+  roundRect(g, cx, 19, cw, 30, 15);
+  g.fill();
+  g.globalAlpha = 1;
+  g.fillText(chip, cx + 11, 35);
+  g.fillStyle = accent;
+  g.font = `700 25px ${FONT_MONO}`;
+  g.fillText(info.code, 32, 35);
+  const nameX = 32 + g.measureText(info.code).width + 12;
+  g.fillStyle = '#eef3fd';
+  fitText(g, info.zh, cx - nameX - 10, 25, 600, FONT_SANS);
+  g.fillText(info.zh, nameX, 35);
+  const label = d.label || info.en;
+  g.fillStyle = d.label ? '#cfe0ff' : '#7f8fae';
+  fitText(g, label, w - 52, 27, d.label ? 600 : 500, FONT_SANS);
+  g.fillText(label, 32, 76);
+  for (let i = 0; i < HISTORY_MAX; i++) {
+    const s = i < d.history.length ? d.history[i] : null;
+    g.fillStyle = s ? HISTORY_COLOR[s] || '#8a94a8' : 'rgba(150, 170, 210, 0.18)';
+    roundRect(g, 32 + i * 24, 106, 18, 14, 3);
+    g.fill();
+  }
+  g.fillStyle = '#9fb0cf';
+  g.font = `600 19px ${FONT_MONO}`;
+  g.textAlign = 'right';
+  g.fillText(`CALLS ${d.count}`, w - 20, 113);
+  g.textAlign = 'left';
+}
+
 // ------------------------------------------------------------ common station frame
 function buildStation(M, kind, index, fx) {
   const info = STATION_INFO[kind];
+  const accent = ACCENT[kind];
   const theta = stationTheta(index);
   const pos = ringPos(theta, RING_R);
   const root = group(`station-${kind}`, [pos.x, 0, pos.z], [0, yawFacingHub(theta), 0]);
   root.userData.solid = `station:${kind}`; // the camera keeps out (camspace.js)
+  const P = stationPalette(M, kind);
   const k = new Kit();
-  const body = ['engraver', 'press', 'generic', 'terminal'].includes(kind) ? 'graphite' : 'white';
-  k.add(body, tf(rbox(1.0, 0.84, 0.8, 0.03), [0, 0.44, -0.15]));
-  k.add('rubber', tf(rbox(0.96, 0.05, 0.76, 0.01), [0, 0.025, -0.15]));
-  k.add('aluDark', tf(rbox(1.04, 0.03, 0.84, 0.01), [0, 0.875, -0.15]));
-  k.add(body === 'white' ? 'graphite' : 'aluDark', tf(box(0.9, 0.01, 0.008), [0, 0.32, 0.252]));
-  k.add('grille', tf(new THREE.PlaneGeometry(0.36, 0.1), [0.24, 0.18, 0.251]));
-  const [tx, tz] = TOWER[kind] || [0.44, -0.5];
-  k.add('alu', tf(cyl(0.012, 0.012, 0.3, 10), [tx, DECK + 0.15, tz]));
-  k.add('graphite', tf(cyl(0.03, 0.03, 0.012, 18), [tx, DECK + 0.46, tz]));
-  const machine = BUILDERS[kind](M, root, k, fx);
-  root.add(k.build({ ...M, ...(k.extra || {}) }, { name: `station-${kind}` }));
+  // Pearl cabinet floating on a recessed titanium plinth; a lit seam runs round the foot.
+  k.add('graphite', tf(rbox(0.9, 0.07, 0.7, 0.02), [0, 0.035, -0.15]));
+  k.add('white', tf(rbox(1.0, 0.8, 0.8, 0.05), [0, 0.47, -0.15]));
+  k.add('graphite', tf(rbox(1.03, 0.026, 0.83, 0.012), [0, 0.877, -0.15]));
+  for (const [sx, sz, x, z] of [[0.86, 0.006, 0, 0.2], [0.86, 0.006, 0, -0.5], [0.006, 0.66, 0.45, -0.15], [0.006, 0.66, -0.45, -0.15]]) {
+    k.add('seam', tf(box(sx, 0.012, sz), [x, 0.05, z]));
+  }
+  // Dark glass visor across the front carries the nameplate and the status lamp.
+  k.add('visor', tf(rbox(0.9, 0.21, 0.014, 0.006), [0, 0.62, 0.252]));
+  const machine = BUILDERS[kind](P, root, k, fx);
+  root.add(k.build({ ...P, ...(k.extra || {}) }, { name: `station-${kind}` }));
 
-  const plate = nameplate(info.zh, info.en, info.code, ACCENT[kind]);
-  root.add(mesh(new THREE.PlaneGeometry(0.46, 0.13), plateMaterial(plate.tex, 0.35), [-0.22, 0.64, 0.253], null, null, { cast: false }));
-  const screen = textScreen(384, 144, { bg: '#03060c', glow: 4 });
-  root.add(mesh(new THREE.PlaneGeometry(0.36, 0.135), screenMaterial(screen.tex, 1.2), [0.25, 0.64, 0.253], null, null, { cast: false }));
+  const plate = nameplate(info.zh, info.en, info.code, accent);
+  root.add(mesh(new THREE.PlaneGeometry(0.46, 0.13), plateMaterial(plate.tex, 0.35), [-0.19, 0.62, 0.2605], null, null, { cast: false }));
+  const lamp = ledMaterial(0x7fe0a8, 0.6);
+  root.add(mesh(box(0.2, 0.03, 0.006), lamp, [0.29, 0.62, 0.2605], null, null, { cast: false }));
   const strip = ledMaterial(0x4d7bff, 0.4);
   root.add(mesh(box(0.92, 0.012, 0.008), strip, [0, 0.83, 0.254], null, null, { cast: false }));
-  const tower = [0xff3b30, 0x4d7bff, 0x34d17a].map((c, i) => {
-    const m = ledMaterial(c, 0.1);
-    root.add(mesh(cyl(0.028, 0.028, 0.045, 18), m, [tx, DECK + 0.33 + (2 - i) * 0.05, tz], null, null, { cast: false }));
-    return m;
+  const holoTex = canvasTexture(HOLO_PX[0], HOLO_PX[1], null);
+  const holoMat = new THREE.MeshBasicMaterial({
+    map: holoTex.tex, transparent: true, depthWrite: false, side: THREE.DoubleSide, color: new THREE.Color().setScalar(1.2),
   });
-  const ped = buildPedestal(M);
+  const holo = mesh(new THREE.PlaneGeometry(HOLO_W, HOLO_H), holoMat, [0, HOLO_Y, -0.1], null, null, { cast: false, receive: false });
+  holo.name = `holo-${kind}`;
+  holo.renderOrder = 3;
+  holo.userData.noSolid = true; // see-through: the camera may pass (camspace.js)
+  root.add(holo);
+  const ped = buildPedestal(P);
   ped.root.position.set(0, 0, PORT_Z);
   root.add(ped.root);
   root.add(blobShadow(M, 1.25, 1.0, [0, 0, -0.12], 0.55));
@@ -638,41 +731,53 @@ function buildStation(M, kind, index, fx) {
   proxy.position.set(0, 1.0, 0.1);
   root.add(proxy);
 
-  const st = { work: 0, flash: 0, flashOk: true, label: '', status: 'idle', screenKey: '' };
+  const st = { work: 0, flash: 0, flashOk: true, label: '', status: 'idle', count: 0, history: [], sig: '' };
   const color = new THREE.Color();
   const BLUE = new THREE.Color(0x4d7bff);
   const GREEN = new THREE.Color(0x34d17a);
   const RED = new THREE.Color(0xff3b30);
   const smokeAt = ringPos(theta, PORT_R + 0.05, WAFER_Y + 0.08);
 
-  function drawScreen() {
-    const statusText = st.status === 'working' ? '加工中 RUN' : st.status === 'error' ? '故障 FAULT' : '待机 IDLE';
-    const key = `${statusText}|${st.label}`;
-    if (key === st.screenKey) return;
-    st.screenKey = key;
-    screen.set([
-      { text: `${info.code}  ${statusText}`, size: 30, color: st.status === 'error' ? '#ff8a80' : st.status === 'working' ? '#9fc0ff' : '#7fe0a8', mono: true, weight: 700, gap: 44 },
-      { text: st.label || '—', size: 34, color: '#e8eefc', gap: 58 },
-    ]);
+  /** Repaints the holo only when something it shows has changed. */
+  function drawReadout() {
+    const sig = `${st.status}|${st.label}|${st.count}|${st.history.join(',')}`;
+    if (sig === st.sig) return;
+    st.sig = sig;
+    holoTex.redraw((g, w, h) => drawHolo(g, w, h, info, accent, st));
   }
-  drawScreen();
+  drawReadout();
 
   return {
     kind,
     index,
     theta,
     root,
+    accent,
+    holo,
     port: ringPos(theta, PORT_R, WAFER_Y),
-    anchor: ringPos(theta, RING_R + 0.12, 2.1),
+    anchor: ringPos(theta, RING_R + 0.1, HOLO_Y + 0.42),
     hover: [{ id: `station:${kind}`, object: proxy }],
     setLabel(text) {
       st.label = text || '';
-      drawScreen();
+      drawReadout();
     },
+    /** Total calls for this station and the outcomes of the latest few (oldest first). */
+    setStats(count, history) {
+      st.count = count;
+      st.history = history;
+      drawReadout();
+    },
+    /** Turns the readout toward the viewer. */
+    face(camera) {
+      holo.lookAt(camera.position);
+    },
+    status: () => st.status,
+    /** What the holo shows (tests and tooltips). */
+    readout: () => ({ status: st.status, label: st.label, count: st.count, history: st.history.slice() }),
     onStart(call) {
       st.label = call.label || call.name;
       machine.onStart?.(call);
-      drawScreen();
+      drawReadout();
     },
     onEnd(call, ok) {
       st.flash = ok ? 0.9 : 2.2;
@@ -685,7 +790,7 @@ function buildStation(M, kind, index, fx) {
       st.flash = Math.max(0, st.flash - dt);
       const err = st.flash > 0 && !st.flashOk;
       st.status = s.working ? 'working' : err ? 'error' : 'idle';
-      drawScreen();
+      drawReadout();
       machine.update(dt, t, { working: s.working, wafer: s.wafer, work: st.work });
       let intensity;
       if (st.flash > 0) {
@@ -699,9 +804,8 @@ function buildStation(M, kind, index, fx) {
       ped.led.emissiveIntensity = intensity;
       strip.emissive.copy(color);
       strip.emissiveIntensity = 0.25 + intensity * 0.6;
-      tower[0].emissiveIntensity = err ? (Math.sin(t * 12) > 0 ? 4 : 0.3) : 0.08;
-      tower[1].emissiveIntensity = 0.08 + st.work * 3.5;
-      tower[2].emissiveIntensity = !s.working && !err ? 1.6 : 0.08;
+      lamp.emissive.copy(err ? RED : s.working ? BLUE : GREEN);
+      lamp.emissiveIntensity = err ? (Math.sin(t * 12) > 0 ? 3.5 : 0.3) : s.working ? 1.2 + st.work * 2.2 : 0.7;
     },
   };
 }
@@ -711,5 +815,22 @@ export function buildStations(M, fx) {
   const list = STATION_ORDER.map((kind, i) => buildStation(M, kind, i, fx));
   for (const s of list) root.add(s.root);
   const byKind = Object.fromEntries(list.map((s) => [s.kind, s]));
-  return { root, list, byKind };
+  const recent = {};
+  return {
+    root,
+    list,
+    byKind,
+    /** Feeds the holo readouts from the session state (null clears them). */
+    setStats(state) {
+      for (const key in recent) recent[key].length = 0;
+      if (state) for (const c of state.calls) (recent[c.kind] || (recent[c.kind] = [])).push(c.status);
+      for (const s of list) {
+        const h = recent[s.kind] || [];
+        s.setStats(state ? state.tools.byKind[s.kind] || 0 : 0, h.slice(-HISTORY_MAX));
+      }
+    },
+    face(camera) {
+      for (const s of list) s.face(camera);
+    },
+  };
 }

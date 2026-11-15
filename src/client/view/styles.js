@@ -8,10 +8,14 @@ export const CSS = `
 .dwp3d-stage{position:absolute;inset:0;user-select:none;-webkit-user-select:none;outline:none}
 .dwp3d-stage:focus-visible{box-shadow:inset 0 0 0 2px rgba(77,107,254,.85)}
 .dwp3d-labels{position:absolute;inset:0;pointer-events:none;overflow:hidden}
-.dwp3d-label{position:absolute;left:0;top:0;display:flex;flex-direction:column;align-items:center;gap:1px;padding:3px 7px 4px;border-radius:6px;background:rgba(9,11,15,.7);border:1px solid rgba(255,255,255,.1);white-space:nowrap;opacity:0;transition:opacity .25s;will-change:transform}
+.dwp3d-label{position:absolute;left:0;top:0;display:flex;align-items:center;gap:6px;padding:3px 9px 3px 7px;border-radius:999px;background:rgba(12,16,24,.68);border:1px solid rgba(255,255,255,.13);box-shadow:0 1px 6px rgba(0,0,0,.2);white-space:nowrap;opacity:0;transition:opacity .25s;will-change:transform}
+.dwp3d-label:before{content:"";flex:none;width:7px;height:7px;border-radius:50%;background:var(--dwp3d-accent,#4d6bfe);box-shadow:0 0 0 2px rgba(255,255,255,.08)}
+.dwp3d-label[data-state=working]:before{background:#6f9bff;box-shadow:0 0 8px #6f9bff;animation:dwp3d-label-pulse 1.1s ease-in-out infinite}
+.dwp3d-label[data-state=error]:before{background:#ff5a4f;box-shadow:0 0 8px #ff5a4f}
 .dwp3d-label:after{content:"";position:absolute;left:50%;bottom:-6px;width:1px;height:6px;background:rgba(255,255,255,.35)}
 .dwp3d-label-title{font-size:11.5px;font-weight:600;color:#eef2fa}
-.dwp3d-label-sub{font-size:10.5px;letter-spacing:.05em;color:#9aaacb;font-family:ui-monospace,"Cascadia Mono",Consolas,monospace}
+.dwp3d-label-sub{font-size:10px;letter-spacing:.06em;color:#93a4c6;font-family:ui-monospace,"Cascadia Mono",Consolas,monospace}
+@keyframes dwp3d-label-pulse{50%{opacity:.4}}
 .dwp3d-panel{background:rgba(12,14,19,.68);border:1px solid rgba(255,255,255,.08);border-radius:10px;backdrop-filter:blur(10px) saturate(1.15);-webkit-backdrop-filter:blur(10px) saturate(1.15);box-shadow:0 6px 24px rgba(0,0,0,.32)}
 .dwp3d-top{position:absolute;top:10px;left:10px;right:10px;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;pointer-events:none;flex-wrap:wrap;z-index:2}
 .dwp3d-top>*{pointer-events:auto}
@@ -110,6 +114,7 @@ export const CSS = `
 @media (prefers-reduced-motion: reduce){
   .dwp3d-spin{animation:none}
   .dwp3d-label,.dwp3d-bar>i{transition:none}
+  .dwp3d-label[data-state=working]:before{animation:none}
 }
 @container dwp3d (max-width: 900px){
   .dwp3d-cards{grid-template-columns:repeat(4,minmax(0,1fr))}
