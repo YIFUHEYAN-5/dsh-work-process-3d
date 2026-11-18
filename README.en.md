@@ -4,7 +4,7 @@
 
 A DeepSeek Harness (DSH) plugin. It adds a "3D process" tab to every conversation and renders the agent's work as a realistic 3D precision factory: tokens are the fuel, tool calls are processed at stations, drones carry out subagent work, and the result of each conversation turn is stored as a batch.
 
-> Version 0.3.0 (in development): an open roof, a starry sky with a ringed planet, a Night scene, a sky-high infinity pool on the balcony and background music. The scene runs on the conversation's real data, and a demo mode remains. After installing or updating the plugin, **restart DSH once** so that its Host part (the session projection and the balance lookup) loads.
+> Version 0.3.0: an open roof, a starry sky with a ringed planet, a Night scene, a sky-high infinity pool on the balcony and background music. The scene runs on the conversation's real data, and a demo mode remains. After installing or updating the plugin, **restart DSH once** so that its Host part (the session projection and the balance lookup) loads.
 
 ## What the scene shows
 
