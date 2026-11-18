@@ -26,11 +26,14 @@ export const CAMERA_PRESETS = {
   fuel: { pos: [-5.6, 2.7, 4.4], target: [-7.6, 1.4, -0.4] },
   engine: { pos: [-1.8, 2.9, 4.8], target: [-3.9, 1.2, -0.5] },
   stations: { pos: [2.6, 6.2, 6.6], target: [2.6, 0.9, -1.2] },
-  // The subagent dock from the right, over the data pool, with the glass facade behind it.
+  // The subagent dock from the right, over the data pool, with the open sky behind it.
   dock: { pos: [-1.0, 3.3, -6.6], target: [-5.3, 1.8, -5.0] },
   products: { pos: [6.1, 2.9, 5.6], target: [8.3, 1.1, 0.4] },
-  // Standing at the balcony rail, looking out over the city toward the setting sun.
-  balcony: { pos: [0.5, 1.7, 23.4], target: [-7.0, -0.4, 41.8], mode: 'look' },
+  // Standing on the balcony behind the sky pool, looking out between the sunset and the ringed
+  // planet.
+  balcony: { pos: [-0.3, 1.6, 22.0], target: [-3.08, 2.3, 41.8], mode: 'look' },
+  // From the edge of the hall, low over the pool water toward the infinity edge and the sunset.
+  pool: { pos: [6.13, 1.4, 19.02], target: [2.94, 0.5, 26.9] },
   // Behind the media wall: the living quarters, seen from the right with the city behind.
   living: { pos: [5.6, 3.3, -14.6], target: [0.5, 0.9, -17.2] },
 };
@@ -79,8 +82,9 @@ const BALANCE_NOTES = {
 /**
  * Build the complete factory scene for one quality tier. The returned object is driven by
  * `setState` (reduced session model) and `setLive` (stream ticks); `setLook` switches between
- * the dusk and day looks, `setBrightness` scales exposure, `setDemo` marks fictional data and
- * `resetState` clears everything a session left behind.
+ * the dusk, day and night looks, `setBrightness` scales exposure, `setDemo` marks fictional data,
+ * `resetState` clears everything a session left behind and `setReducedMotion` stops purely
+ * decorative motion in the sky.
  */
 export function buildWorld(renderer, quality, { environment = true, demo: demoInit = false, look = DEFAULT_LOOK, brightness = BRIGHTNESS.initial } = {}) {
   let demo = !!demoInit;
@@ -131,7 +135,7 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
   const solids = solidsFromScene(scene);
 
   const staticHover = [];
-  for (const h of [...fuel.hover, ...engine.hover, ...cell.hover, ...stations.list.flatMap((s) => s.hover), ...stocker.hover, ...dock.hover, ...living.hover, ...screens.hover]) {
+  for (const h of [...fuel.hover, ...engine.hover, ...cell.hover, ...stations.list.flatMap((s) => s.hover), ...stocker.hover, ...dock.hover, ...living.hover, ...stage.pool.hover, ...screens.hover]) {
     h.object.userData.hoverId = h.id;
     staticHover.push(h.object);
   }
@@ -146,6 +150,7 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
     { id: 'stocker', anchor: stocker.anchors.stocker.clone().setY(1.25) },
     { id: 'dock', anchor: dock.labelAnchor },
     { id: 'living', anchor: living.labelAnchor },
+    { id: 'pool', anchor: stage.pool.labelAnchor },
   ];
 
   const live = { phase: 'idle', tps: 0, balance: null, currency: 'CNY', balanceStatus: 'unavailable' };
@@ -238,6 +243,10 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
     setBrightness(v) {
       bright = clamp(Number(v) || BRIGHTNESS.initial, BRIGHTNESS.min, BRIGHTNESS.max);
     },
+    /** Stop twinkling and shooting stars (system "reduce motion" setting). */
+    setReducedMotion(on) {
+      stage.setReducedMotion(on);
+    },
     setState(next) {
       if (!next) return;
       if (state && next.tools.errors > errors) errorPulse = true;
@@ -288,6 +297,8 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
     },
     /** Subagent dock: { running, done, failed, stopped, overflow, wf, last } (tooltip). */
     dockInfo: () => dock.counts(),
+    /** Smoothed session activity 0..1 (the same value that drives the city and the beam). */
+    activity: () => activity,
     update(dt, t, camera) {
       tps = damp(tps, live.tps || 0, 6, dt);
       readoutT += dt;

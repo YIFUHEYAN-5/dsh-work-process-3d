@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { canvasTexture, FONT_SANS, FONT_MONO, clamp } from './util.js';
+import { canvasTexture, FONT_SANS, FONT_MONO, clamp, pixelAngle } from './util.js';
 import { ATRIUM } from './layout.js';
 import { NO_REFLECT_LAYER } from './reflection.js';
 import {
@@ -744,16 +744,6 @@ void main() {
 `;
 
 const BEAM_MIN_PX = 1.4;
-const _drawSize = new THREE.Vector2();
-
-// World size of one pixel at unit distance for the camera and target being rendered (the floor
-// mirror renders with its own camera and a smaller target).
-function pixelAngle(renderer, camera) {
-  const target = renderer.getRenderTarget();
-  const height = target ? target.height : renderer.getDrawingBufferSize(_drawSize).y;
-  const p = camera.projectionMatrix.elements[5];
-  return height > 0 && p > 0 ? 2 / (p * height) : 0;
-}
 
 const TETHER_VERT = /* glsl */ `
 ${CITY_GLSL}

@@ -1,47 +1,55 @@
 import * as THREE from 'three';
 
 /*
- * Floor plan of the atrium, shared by the scene builders, the camera limits, the shaders and
+ * Floor plan of the roof deck, shared by the scene builders, the camera limits, the shaders and
  * the tests. World units are metres, Y is up. Machines stand on islands whose tops are at
  * y = 0; the islands float over a recessed data pool (the "well"); a polished floor rings the
- * well and runs out to the round glass curtain wall. Angles use the same convention as the
- * station ring: x = cx + r·cos(a), z = cz − r·sin(a), so a = 90° points to the back (−z).
+ * well and runs out to a low glass balustrade at the edge of the tower. There is no roof: the
+ * sky is open. Angles use the same convention as the station ring: x = cx + r·cos(a),
+ * z = cz − r·sin(a), so a = 90° points to the back (−z).
  */
 
 export const DEG = Math.PI / 180;
 
-export const ATRIUM = { cx: 0.5, cz: -1.0, r: 22, h: 13.5 };
+/** The round hall on top of the tower (radius of the floor edge). */
+export const ATRIUM = { cx: 0.5, cz: -1.0, r: 22 };
+
+/** Frameless glass balustrade along the hall edge; it stays open across the balcony. */
+export const RAIL = { r: 21.97, h: 1.1 };
 
 /**
- * Glass curtain wall: full-height panes joined by glass fins. Between doorA0 and doorA1 the
- * lower part is a pair of sliding doors that stand open onto the balcony.
+ * Balcony on the sunset side (front, +z): an annular sector at hall floor level with the sky
+ * pool in the middle and sun decks on both sides. The balustrade follows its sides and outer
+ * arc, except along the pool's infinity edge.
  */
-export const FACADE = { panes: 24, finDepth: 0.36, doorA0: 263 * DEG, doorA1: 277 * DEG, doorH: 3.1 };
+export const BALCONY = { a0: 232 * DEG, a1: 308 * DEG, r0: 22.0, r1: 31.0, slab: 0.6, rail: 1.1 };
 
 /**
- * Balcony on the sunset side (front, +z): an annular sector outside the glass at hall floor
- * level, with a frameless glass parapet at r1 and a slim canopy over it.
+ * Sky pool: an annular-sector basin in the balcony deck. The water stands just below the deck;
+ * on the outer arc it spills over a knife edge into a catch trough, so it seems to run straight
+ * into the sky.
  */
-export const BALCONY = { a0: 236 * DEG, a1: 304 * DEG, r0: 22.0, r1: 26.0, slab: 0.45, rail: 1.1, canopyY: 4.2 };
+export const POOL = { a0: 250 * DEG, a1: 290 * DEG, r0: 24.4, r1: 30.2, water: -0.05, depth: 1.35, trough: 0.75 };
 
-/** The atrium is the top floor of a skyscraper; the city's street level lies far below. */
+/** The hall is the top of a skyscraper; the city's street level lies far below. */
 export const TOWER = { r: 22.35, groundY: -420 };
 
 /**
- * Camera limits. The orbit camera stays inside the glass; the roaming camera may also walk out
- * through the open doors onto the balcony. Targets are orbit centres.
+ * Camera limits. With the roof gone the camera may rise high over the deck; it stays inside
+ * the balustrade, except over the balcony, which is open to the hall along its whole width.
+ * Targets are orbit centres.
  */
 export const CAMERA_LIMIT = {
   r: 21.3,
   yMin: 0.35,
-  yMax: 13.0,
-  outerR: 22.6, // balcony side of the glass line (fins, door track)
-  balconyR: 25.45,
-  balconyYMax: 3.85,
+  yMax: 24.0,
+  balconyR: 30.45,
   edge: 1.5 * DEG,
   targetR: 17,
-  // Orbit targets stay a little above the floor (and below the ceiling) so the camera always
-  // has room to swing under or over them.
+  // Over the balcony, orbit targets keep a little more room from its sides and outer edge.
+  targetBalconyR: 29.2,
+  targetEdge: 4 * DEG,
+  // Orbit targets stay a little above the floor so the camera can always swing under them.
   targetYMin: 0.4,
   targetYMax: 12,
 };
@@ -109,20 +117,29 @@ export function atriumAngle(x, z) {
   return a < 0 ? a + TAU : a;
 }
 
-/** The walkable camera region a point lies in: 'hall', 'door', 'balcony' or null. */
+/** True when angle `a` (atriumAngle convention) lies within the balcony sector shrunk by `edge`. */
+export function inBalconySector(a, edge = 0) {
+  return a >= BALCONY.a0 + edge && a <= BALCONY.a1 - edge;
+}
+
+/** True when the point (x, z) lies over the pool basin or its catch trough. */
+export function overPool(x, z, margin = 0) {
+  const r = Math.hypot(x - ATRIUM.cx, z - ATRIUM.cz);
+  if (r < POOL.r0 - margin || r > POOL.r1 + POOL.trough + margin) return false;
+  const a = atriumAngle(x, z);
+  const m = margin / Math.max(r, 1);
+  return a >= POOL.a0 - m && a <= POOL.a1 + m;
+}
+
+/** The walkable camera region a point lies in: 'hall', 'balcony' or null. */
 export function cameraRegion(v) {
   const L = CAMERA_LIMIT;
   const eps = 1e-6;
-  if (v.y < L.yMin - eps) return null;
+  if (v.y < L.yMin - eps || v.y > L.yMax + eps) return null;
   const r = Math.hypot(v.x - ATRIUM.cx, v.z - ATRIUM.cz);
-  if (r <= L.r + eps) return v.y <= L.yMax + eps ? 'hall' : null;
-  const a = atriumAngle(v.x, v.z);
-  if (r <= L.outerR + eps) {
-    const inDoor = a >= FACADE.doorA0 + L.edge - eps && a <= FACADE.doorA1 - L.edge + eps;
-    return inDoor && v.y <= FACADE.doorH - 0.25 + eps ? 'door' : null;
-  }
-  const inSector = a >= BALCONY.a0 + L.edge - eps && a <= BALCONY.a1 - L.edge + eps;
-  return inSector && r <= L.balconyR + eps && v.y <= L.balconyYMax + eps ? 'balcony' : null;
+  if (r <= L.r + eps) return 'hall';
+  if (r > L.balconyR + eps) return null;
+  return inBalconySector(atriumAngle(v.x, v.z), L.edge - eps) ? 'balcony' : null;
 }
 
 function clampRadius(v, rMin, rMax) {
@@ -146,33 +163,66 @@ function clampSector(v, a0, a1) {
 }
 
 /**
- * Keep a roaming camera position inside the walkable regions (modifies and returns `v`).
- * `prev` is the last accepted position: a move that leaves every region is pulled back into
- * the region it came from, so the glass can only be crossed through the open doors.
+ * Keep a camera position inside the walkable regions (modifies and returns `v`). `prev` is the
+ * last accepted position: a move that leaves every region is pulled back into the region it
+ * came from, so the camera slides along the balustrade instead of jumping across a corner.
  */
 export function clampCameraPoint(v, prev = null) {
   if (cameraRegion(v)) return v;
   const L = CAMERA_LIMIT;
+  v.y = clampN(v.y, L.yMin, L.yMax);
+  if (cameraRegion(v)) return v;
   let from = prev ? cameraRegion(prev) : null;
   if (!from) {
     const r = Math.hypot(v.x - ATRIUM.cx, v.z - ATRIUM.cz);
-    const a = atriumAngle(v.x, v.z);
-    from = r > ATRIUM.r && a >= BALCONY.a0 && a <= BALCONY.a1 ? 'balcony' : 'hall';
-  }
-  if (from === 'door') {
-    clampSector(v, FACADE.doorA0 + L.edge, FACADE.doorA1 - L.edge);
-    v.y = clampN(v.y, L.yMin, FACADE.doorH - 0.25);
-    if (cameraRegion(v)) return v;
-    from = Math.hypot(prev.x - ATRIUM.cx, prev.z - ATRIUM.cz) > ATRIUM.r ? 'balcony' : 'hall';
+    from = r > L.r && inBalconySector(atriumAngle(v.x, v.z)) ? 'balcony' : 'hall';
   }
   if (from === 'balcony') {
     clampSector(v, BALCONY.a0 + L.edge, BALCONY.a1 - L.edge);
-    clampRadius(v, L.outerR + 0.001, L.balconyR);
-    v.y = clampN(v.y, L.yMin, L.balconyYMax);
+    clampRadius(v, 0, L.balconyR);
   } else {
     clampRadius(v, 0, L.r);
-    v.y = clampN(v.y, L.yMin, L.yMax);
   }
+  return v;
+}
+
+/**
+ * Keep an orbit target where the camera has room around it (modifies and returns `v`): within
+ * targetR of the hall centre, or over the balcony. A target outside both moves to the nearer
+ * of the two areas.
+ */
+export function clampTargetPoint(v) {
+  const L = CAMERA_LIMIT;
+  v.y = clampN(v.y, L.targetYMin, L.targetYMax);
+  const dx = v.x - ATRIUM.cx;
+  const dz = v.z - ATRIUM.cz;
+  const r = Math.hypot(dx, dz);
+  if (r <= L.targetR) return v;
+  const lo = BALCONY.a0 + L.targetEdge;
+  const hi = BALCONY.a1 - L.targetEdge;
+  const a = atriumAngle(v.x, v.z);
+  if (a >= lo && a <= hi && r <= L.targetBalconyR) return v;
+  // Nearest point of the hall disc.
+  const hx = ATRIUM.cx + (dx * L.targetR) / r;
+  const hz = ATRIUM.cz + (dz * L.targetR) / r;
+  // Nearest point of the balcony sector: on its ray when the angle is outside, else radial.
+  let bx;
+  let bz;
+  if (a >= lo && a <= hi) {
+    bx = ATRIUM.cx + (dx * L.targetBalconyR) / r;
+    bz = ATRIUM.cz + (dz * L.targetBalconyR) / r;
+  } else {
+    const t = angDist(a, lo) < angDist(a, hi) ? lo : hi;
+    const ux = Math.cos(t);
+    const uz = -Math.sin(t);
+    const s = clampN(dx * ux + dz * uz, 0, L.targetBalconyR);
+    bx = ATRIUM.cx + ux * s;
+    bz = ATRIUM.cz + uz * s;
+  }
+  const dh = (hx - v.x) ** 2 + (hz - v.z) ** 2;
+  const db = (bx - v.x) ** 2 + (bz - v.z) ** 2;
+  v.x = dh <= db ? hx : bx;
+  v.z = dh <= db ? hz : bz;
   return v;
 }
 

@@ -138,13 +138,15 @@ test('labels and hover targets match the naming table', async () => {
 
 test('machines stand on the floating islands inside the atrium', async () => {
   const THREE = await import('three');
-  const { sdIslands, sdWell, ISLANDS, ATRIUM, MEDIA, CAMERA_LIMIT, mediaScreens, cameraRegion } = await import('../src/client/scene/layout.js');
+  const { sdIslands, sdWell, ISLANDS, CAMERA_LIMIT, MEDIA, mediaScreens, cameraRegion, overPool } = await import('../src/client/scene/layout.js');
   const world = buildWorld(null, 'medium', { environment: false });
   world.update(1 / 60, 0);
   world.scene.updateMatrixWorld(true);
-  // Machine labels hang over the islands; the living quarters stand on the outer floor behind the media wall.
+  // Machine labels hang over the islands; the living quarters stand on the outer floor behind
+  // the media wall, and the sky pool label hangs over its water on the balcony.
   for (const a of world.labelAnchors) {
     if (a.id === 'living') assert.ok(sdWell(a.anchor.x, a.anchor.z) > 0, 'living is outside the well');
+    else if (a.id === 'pool') assert.ok(overPool(a.anchor.x, a.anchor.z), 'the pool label hangs over the water');
     else assert.ok(sdIslands(a.anchor.x, a.anchor.z) < 0, `${a.id} is above an island`);
   }
   // Everything that stands on the floor must stand on an island (5 cm tolerance).
@@ -178,53 +180,57 @@ test('machines stand on the floating islands inside the atrium', async () => {
   }
   for (const [name, p] of Object.entries(world.presets)) {
     const region = cameraRegion({ x: p.pos[0], y: p.pos[1], z: p.pos[2] });
-    if (p.mode === 'look') {
-      assert.ok(region, `${name} roaming preset stands in a walkable region`);
-    } else {
-      assert.ok(Math.hypot(p.pos[0] - ATRIUM.cx, p.pos[2] - ATRIUM.cz) <= CAMERA_LIMIT.r, `${name} preset camera is inside the glass`);
-      assert.ok(p.pos[1] >= CAMERA_LIMIT.yMin && p.pos[1] <= CAMERA_LIMIT.yMax, `${name} preset camera height`);
-    }
+    assert.ok(region, `${name} preset camera stands in a walkable region`);
+    assert.ok(p.pos[1] >= CAMERA_LIMIT.yMin && p.pos[1] <= CAMERA_LIMIT.yMax, `${name} preset camera height`);
   }
   for (const s of mediaScreens()) assert.ok(s.a0 >= MEDIA.a0 && s.a1 <= MEDIA.a1, `${s.id} fits on the media wall`);
   world.dispose();
 });
 
-test('the roaming camera reaches the balcony only through the open doors', async () => {
-  const { ATRIUM, CAMERA_LIMIT, FACADE, BALCONY, cameraRegion, clampCameraPoint } = await import('../src/client/scene/layout.js');
+test('the balcony opens across its whole width and the balustrade bounds the deck', async () => {
+  const { ATRIUM, CAMERA_LIMIT, BALCONY, cameraRegion, clampCameraPoint, clampTargetPoint, overPool } = await import('../src/client/scene/layout.js');
   const at = (deg, r, y) => {
     const a = (deg * Math.PI) / 180;
     return { x: ATRIUM.cx + r * Math.cos(a), y, z: ATRIUM.cz - r * Math.sin(a) };
   };
   const radius = (v) => Math.hypot(v.x - ATRIUM.cx, v.z - ATRIUM.cz);
-  const doorMid = ((FACADE.doorA0 + FACADE.doorA1) / 2) * (180 / Math.PI);
-  const balconyMid = ((BALCONY.a0 + BALCONY.a1) / 2) * (180 / Math.PI);
+  const deg = (a) => (a * 180) / Math.PI;
+  const balconyMid = deg((BALCONY.a0 + BALCONY.a1) / 2);
 
   assert.equal(cameraRegion(at(200, 10, 1.6)), 'hall');
-  assert.equal(cameraRegion(at(doorMid, 22, 1.6)), 'door');
   assert.equal(cameraRegion(at(balconyMid, 24, 1.6)), 'balcony');
-  assert.equal(cameraRegion(at(180, 23, 1.6)), null, 'no balcony on the left side');
-  assert.equal(cameraRegion(at(doorMid, 22, 3.5)), null, 'the door is not full height');
+  assert.equal(cameraRegion(at(balconyMid, 27, 12)), 'balcony', 'the sky above the deck is open');
+  assert.equal(cameraRegion(at(180, 23, 1.6)), null, 'no deck on the left side');
 
-  // Walking into the glass beside the doors stops at the glass.
-  const wall = clampCameraPoint(at(250, 22.4, 1.6), at(250, 21.0, 1.6));
-  assert.ok(radius(wall) <= CAMERA_LIMIT.r + 1e-6, 'blocked by the glass');
-  // Through the doors: hall → door → balcony.
-  const door = clampCameraPoint(at(doorMid, 22.1, 1.6), at(doorMid, 21.2, 1.6));
-  assert.equal(cameraRegion(door), 'door');
-  const out = clampCameraPoint(at(doorMid, 23.0, 1.6), door);
-  assert.equal(cameraRegion(out), 'balcony');
-  // From the balcony the glass blocks the way back in except at the doors.
-  const back = clampCameraPoint(at(250, 21.5, 1.6), at(250, 23.5, 1.6));
-  assert.equal(cameraRegion(back), 'balcony');
-  assert.ok(radius(back) > CAMERA_LIMIT.r, 'stays outside');
-  // The parapet and the canopy bound the balcony.
-  const rail = clampCameraPoint(at(balconyMid, 27, 1.6), at(balconyMid, 24, 1.6));
+  // No doors any more: the camera walks out anywhere along the width of the balcony.
+  for (const d of [deg(BALCONY.a0) + 3, 250, balconyMid, 290, deg(BALCONY.a1) - 3]) {
+    const out = clampCameraPoint(at(d, 22.2, 1.6), at(d, 21.0, 1.6));
+    assert.equal(cameraRegion(out), 'balcony', `step out at ${d}°`);
+    assert.ok(Math.abs(radius(out) - 22.2) < 1e-9, `not held back at ${d}°`);
+  }
+  // Beside the balcony the balustrade stops the camera at the hall edge.
+  const wall = clampCameraPoint(at(200, 22.4, 1.6), at(200, 21.0, 1.6));
+  assert.ok(radius(wall) <= CAMERA_LIMIT.r + 1e-6, 'blocked by the balustrade');
+  // Walking off the side of the deck slides along its balustrade.
+  const side = clampCameraPoint(at(deg(BALCONY.a0) - 2, 26, 1.6), at(deg(BALCONY.a0) + 3, 26, 1.6));
+  assert.equal(cameraRegion(side), 'balcony');
+  // The outer walkway ends at the balustrade and the infinity edge.
+  const rail = clampCameraPoint(at(balconyMid, 32, 1.6), at(balconyMid, 28, 1.6));
   assert.ok(radius(rail) <= CAMERA_LIMIT.balconyR + 1e-6);
-  const roof = clampCameraPoint(at(balconyMid, 24, 6), at(balconyMid, 24, 1.6));
-  assert.ok(roof.y <= CAMERA_LIMIT.balconyYMax + 1e-6);
-  // The hall keeps the camera between floor and ceiling.
+  // The camera may fly over the pool, but not into the water.
+  const swim = clampCameraPoint(at(270, 27, -1), at(270, 27, 1.6));
+  assert.ok(overPool(swim.x, swim.z), 'still over the pool');
+  assert.ok(swim.y >= CAMERA_LIMIT.yMin - 1e-6, 'above the water');
+  // Floor and height limit under the open sky.
   const low = clampCameraPoint(at(120, 8, -1), at(120, 8, 1));
   assert.ok(low.y >= CAMERA_LIMIT.yMin - 1e-6);
+  const high = clampCameraPoint(at(120, 8, 40), at(120, 8, 10));
+  assert.ok(high.y <= CAMERA_LIMIT.yMax + 1e-6);
+  // Orbit targets stay over the hall or the balcony deck.
+  const lost = clampTargetPoint(at(200, 25, 1));
+  assert.ok(Math.abs(radius(lost) - CAMERA_LIMIT.targetR) < 1e-6, 'a target beside the deck moves back over the hall');
+  const pool = clampTargetPoint(at(270, 27, 1));
+  assert.ok(Math.abs(radius(pool) - 27) < 1e-6, 'a target over the pool is kept');
 });
 
 test('looks and brightness change the post settings without a rebuild', () => {

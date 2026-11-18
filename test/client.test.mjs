@@ -17,6 +17,7 @@ import { BALANCE_PATH } from '../src/host/balance.js';
 import { DICTS } from '../src/client/locale.js';
 import { initialState } from '../src/model/reducer.js';
 import { toView } from '../src/model/view.js';
+import { LOOK_IDS } from '../src/client/scene/looks.js';
 
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) <= eps, `${a} ≈ ${b}`);
 
@@ -146,6 +147,11 @@ test('every HUD text has a Chinese and an English string', () => {
   // Keys built at run time.
   for (const id of ['live', 'demo']) keys.add(`source.${id}`).add(`source.${id}Hint`);
   for (const p of ['idle', 'thinking', 'reasoning', 'generating', 'tool']) keys.add(`phase.${p}`);
+  for (const id of LOOK_IDS) keys.add(`look.${id}`);
+  const views = src.match(/const VIEWS = \[([^\]]+)\]/);
+  assert.ok(views, 'the VIEWS list is found');
+  for (const m of views[1].matchAll(/'([a-z]+)'/g)) keys.add(`view.${m[1]}`);
+  assert.ok(keys.has('view.pool') && keys.has('look.night'), 'the pool view and the night look are covered');
   assert.ok(keys.size > 80, `found ${keys.size} keys`);
   for (const lang of ['zh', 'en']) {
     for (const key of keys) {

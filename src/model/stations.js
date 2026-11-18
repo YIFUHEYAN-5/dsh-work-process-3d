@@ -35,6 +35,7 @@ export const MACHINE_INFO = {
   gantry: { zh: '天车', en: 'Gantry crane', code: 'OHT-1' },
   dock: { zh: '子智能体坞站', en: 'Subagent dock', code: 'SA-1' },
   living: { zh: '生活区', en: 'Living quarters', code: 'LV-1' },
+  pool: { zh: '高空泳池', en: 'Sky pool', code: 'SP-1' },
 };
 
 /** Kinds whose successful calls count as produced output. */

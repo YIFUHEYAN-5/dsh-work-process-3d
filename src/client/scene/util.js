@@ -63,6 +63,19 @@ export const easeInOut = (t) => {
 };
 /** Frame-rate independent exponential approach. */
 export const damp = (current, target, lambda, dt) => lerp(current, target, 1 - Math.exp(-lambda * dt));
+
+const _drawSize = new THREE.Vector2();
+/**
+ * Size of one pixel at unit distance (radians, small-angle) for the camera and render target
+ * being drawn: the floor mirror and the environment capture use their own cameras and targets.
+ * Meant for onBeforeRender(renderer, scene, camera).
+ */
+export function pixelAngle(renderer, camera) {
+  const target = renderer.getRenderTarget();
+  const height = target ? target.height : renderer.getDrawingBufferSize(_drawSize).y;
+  const p = camera.projectionMatrix.elements[5];
+  return height > 0 && p > 0 ? 2 / (p * height) : 0;
+}
 export function angleLerp(a, b, t) {
   let d = (b - a) % TAU;
   if (d > Math.PI) d -= TAU;
