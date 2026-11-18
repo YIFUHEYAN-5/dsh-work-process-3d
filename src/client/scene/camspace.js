@@ -3,6 +3,7 @@ import {
   ATRIUM, MEDIA, WELL, BALCONY, POOL, RAIL, TOWER,
   cameraRegion, clampCameraPoint, inBalconySector, overPool, sdIslands, sdWell,
 } from './layout.js';
+import { POOL_LEVELS } from './pool.js';
 
 /*
  * Where the camera may be.
@@ -341,7 +342,10 @@ export function createCameraSpace(objects = []) {
         const a = angleOf(_p.x - ATRIUM.cx, _p.z - ATRIUM.cz);
         let level = null;
         if (r <= TOWER.r) level = sdWell(_p.x, _p.z) < 0 && sdIslands(_p.x, _p.z) > 0 ? -WELL.depth : 0;
-        else if (r <= BALCONY.r1 && inBalconySector(a)) level = overPool(_p.x, _p.z) ? POOL.water : 0;
+        else if (r <= BALCONY.r1 && inBalconySector(a)) {
+          // Past the knife edge the catch trough holds water 0.42 m below the basin.
+          level = overPool(_p.x, _p.z) ? (r > POOL.r1 ? POOL_LEVELS.troughWater : POOL.water) : 0;
+        }
         if (level !== null) {
           const tl = (level - origin.y) / dir.y;
           if (tl > 0 && tl < best) best = tl;

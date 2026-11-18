@@ -261,4 +261,11 @@ test('the water is a real surface under the roaming camera', () => {
   // The balcony deck still keeps the walking camera from drifting over the pool's far edge.
   const out = clampTargetPoint(new THREE.Vector3(ATRIUM.cx + 40 * Math.cos(a), 1, ATRIUM.cz - 40 * Math.sin(a)));
   assert.ok(Math.hypot(out.x - ATRIUM.cx, out.z - ATRIUM.cz) <= 30, 'targets stay on the deck');
+  // Past the knife edge the catch trough holds water well below the basin.
+  const tr = POOL.r1 + POOL.trough / 2;
+  const tx = ATRIUM.cx + tr * Math.cos(a);
+  const tz = ATRIUM.cz - tr * Math.sin(a);
+  const troughHit = space.surfaceHit(new THREE.Vector3(tx, 6, tz), new THREE.Vector3(0, -1, 0));
+  assert.ok(Math.abs(6 - troughHit - POOL_LEVELS.troughWater) < 1e-6, 'the trough is its own water level');
+  assert.ok(POOL_LEVELS.troughWater < POOL.water - 0.3, 'and it sits below the basin');
 });

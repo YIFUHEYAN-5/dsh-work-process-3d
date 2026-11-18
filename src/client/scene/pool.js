@@ -211,9 +211,11 @@ void main() {
   vec3 body = uBody * (0.35 + uGlow);
   float trans = (1.0 - F) * uClarity;
   vec3 col = refl * F + body * (1.0 - F) * (1.0 - uClarity) + uSunColor * glint;
-  // The water curls over the knife edge: a faint bright line along the outer arc.
+  // The water curls over the knife edge: a faint bright line along the outer arc, dying out at
+  // the knife itself so the catch trough beyond it stays dark.
   float r = length(p - uCentre);
-  col += vec3(0.55, 0.85, 1.0) * smoothstep(uEdgeR - 0.05, uEdgeR, r) * 0.12;
+  float lip = smoothstep(uEdgeR - 0.05, uEdgeR, r) * (1.0 - smoothstep(uEdgeR + 0.002, uEdgeR + 0.05, r));
+  col += vec3(0.55, 0.85, 1.0) * lip * 0.12;
   gl_FragColor = vec4(col, 1.0 - trans);
 }`;
 
