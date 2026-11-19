@@ -1,6 +1,6 @@
 // Offline viewer for the rigged whale girl. build.mjs bundles this file, three.js and the model into one HTML file that
 // opens by double-click (file://) without a server or network access.
-// Optional URL parameters: clip=<clip|bind> t=<s> play=0|1 speed=<x> view=<name> shade=toon|flat|heat|zones w=fixed|tripo
+// Optional URL parameters: clip=<clip|bind> t=<s> play=0|1 speed=<x> view=<name> shade=toon|flat|heat|zones|uv w=fixed|tripo
 // outline=0|1 tail=0|1 ahoge=0|1 bones=0|1 rot=0|1 issue=<id> ui=0. The title turns into "READY {...}" once the first
 // frames are drawn; window.whaleViewer exposes the controls plus evalClip() for scripted checks.
 import * as THREE from 'three';
@@ -9,6 +9,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { applyToon, toonMaterial, outlineMaterial } from '../src/toon.js';
 import { createTail } from '../src/tail.js';
 import { createAhoge } from '../src/ahoge.js';
+import { createLace } from '../src/lace.js';
 import landmarks from '../assets/landmarks.json';
 import { ISSUES } from './issues.js';
 
@@ -94,6 +95,24 @@ async function init() {
   const skinned = []; body.traverse(o => { if (o.isSkinnedMesh) skinned.push(o); });
   const mesh = skinned[0], geo = mesh.geometry;
   const flat = new Map(skinned.map(m => [m, new THREE.MeshBasicMaterial({ map: m.material.map || null, color: m.material.map ? 0xffffff : (m.material.color || 0xffffff), vertexColors: !!m.material.vertexColors, side: THREE.DoubleSide })]));
+  // shade=uv: paint the texture coordinates themselves (u in red, 1-v in green) so a screenshot decodes back to the
+  // atlas. The canvas texture is tagged sRGB and the output pass re-encodes, so the round trip is near identity.
+  const uvMat = (() => {
+    const n = 512, cv = document.createElement('canvas');
+    cv.width = n; cv.height = n;
+    const ctx = cv.getContext('2d'), im = ctx.createImageData(n, n);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const i = (y * n + x) * 4;
+      im.data[i] = Math.round((x + 0.5) / n * 255);
+      im.data[i + 1] = Math.round((1 - (y + 0.5) / n) * 255);
+      im.data[i + 2] = 0; im.data[i + 3] = 255;
+    }
+    ctx.putImageData(im, 0, 0);
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace; t.flipY = false;
+    t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
+    return new THREE.MeshBasicMaterial({ map: t, toneMapped: false, side: THREE.DoubleSide });
+  })();
   applyToon(body, { outline: 0.0022, vib: 0.8 });
   const toon = new Map(skinned.map(m => [m, m.material]));
   const heatMat = new THREE.MeshLambertMaterial({ vertexColors: true });
@@ -111,6 +130,15 @@ async function init() {
   if (!hip || !head) throw new Error('模型里缺少 Pelvis 或 Head 骨骼');
   tail.follow(hip, { floor: 0 });
   head.attach(ahoge.root);
+  const lq = new URLSearchParams(location.search);
+  const laceMode = lq.get('lmode') || 'off';
+  const lace = laceMode === 'off' ? { mesh: { visible: false }, tris: 0, skinnedOk: false } : createLace({ body: mesh, options: {
+    mode: laceMode,
+    y0: +(lq.get('ly0') || 0.335), y1: +(lq.get('ly1') || 0.398),
+    offset: +(lq.get('loff') || 0.008),
+    navyOnly: lq.get('lnavy') !== '0'
+  } });
+  if (lace.mesh.geometry) console.log('LACE ' + JSON.stringify({ verts: lace.mesh.geometry.attributes.position.count, tris: lace.tris, skinned: lace.skinnedOk }));
 
   const rest = []; body.traverse(o => { if (o.isBone) rest.push([o, o.position.clone(), o.quaternion.clone(), o.scale.clone()]); });
   const bindQ = new Map(); body.traverse(o => { if (o.isBone) bindQ.set(o.name, o.getWorldQuaternion(new THREE.Quaternion())); });
@@ -223,12 +251,13 @@ async function init() {
     poseAt(t); syncUI();
   }
   function setShade(mode) {
-    if (!['toon', 'flat', 'heat', 'zones'].includes(mode) || (mode === 'zones' && !zoneCol)) return;
+    if (!['toon', 'flat', 'heat', 'zones', 'uv'].includes(mode) || (mode === 'zones' && !zoneCol)) return;
     S.shade = mode;
-    for (const m of skinned) m.material = mode === 'flat' ? flat.get(m) : mode === 'heat' ? heatMat : mode === 'zones' ? zoneMat : toon.get(m);
+    for (const m of skinned) m.material = mode === 'flat' ? flat.get(m) : mode === 'heat' ? heatMat : mode === 'zones' ? zoneMat : mode === 'uv' ? uvMat : toon.get(m);
+    lace.mesh.visible = mode === 'toon';
     if (mode === 'heat') geo.setAttribute('color', heatCol); else if (mode === 'zones') geo.setAttribute('color', zoneCol); else if (baseCol) geo.setAttribute('color', baseCol);
-    tail.meshes[0].material = tail.meshes[2].material = mode === 'flat' ? tailFlat : tailToon;
-    ahoge.mesh.material = mode === 'flat' ? ahFlat : ahToon;
+    tail.meshes[0].material = tail.meshes[2].material = mode === 'flat' ? tailFlat : mode === 'uv' ? uvMat : tailToon;
+    ahoge.mesh.material = mode === 'flat' ? ahFlat : mode === 'uv' ? uvMat : ahToon;
     dirty = true; syncUI();
   }
   function setWeights(w) {

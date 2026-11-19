@@ -4,9 +4,17 @@
 // Real-time use: call update(t, { ...state, dt }) every frame after the animation mixer; dt adds a short lag (see smooth()).
 import * as THREE from 'three';
 
-// fitted to the Tripo body (1.35 m, feet y=0, facing +z): leg backs at z = -0.02, skirt back hem z = -0.153 at y = 0.50, hip back z = -0.085 at y = 0.70
-export const SPINE = [[0, 0.70, -0.04], [0, 0.52, -0.10], [0, 0.34, -0.09], [0, 0.18, -0.082], [0, 0.09, -0.095], [0, 0.055, -0.175]];
-const COL = { dorsal: new THREE.Color('#1f2a66'), mid: new THREE.Color('#3a5cc0'), belly: new THREE.Color('#d3e3f8'), edge: new THREE.Color('#9cbcec') };
+// fitted to the Tripo body (1.35 m, feet y=0, facing +z): leg backs at z = -0.02, skirt back hem z = -0.153 at y = 0.50, hip back z = -0.085 at y = 0.70.
+// The tail stays inside the skirt down to the hem and crosses the fabric right at the white ruffle (z = -0.166 at y = 0.475),
+// so the skirt is not cut open higher up and the tail below the hem is unobstructed.
+// A gentle S keeps the tail from reading as a straight bar from behind, and the skirt hem (z = -0.153 at y = 0.50) is
+// cleared at z = -0.168 so the fabric is not cut open where the tail leaves the skirt.
+// Inside the skirt the spine stays well forward of the fabric: the tube plus its radius has to clear the skirt's back
+// surface, otherwise the tail pokes a dark blob through the navy cloth around y 0.6.
+export const SPINE = [[0, 0.70, -0.03], [0.008, 0.58, -0.052], [0.014, 0.52, -0.075], [0.018, 0.475, -0.166], [0.010, 0.36, -0.156], [-0.008, 0.24, -0.14], [-0.022, 0.12, -0.15], [-0.03, 0.05, -0.212]];
+// Three flat cel values, no gradient: the tail has to sit in the same banded world as the dress (flat #2a2d5c with one
+// hard cel edge), so the cylinder is painted in three steps that run along its length.
+const COL = { dorsal: new THREE.Color('#232a66'), mid: new THREE.Color('#34408a'), belly: new THREE.Color('#6f86d8'), edge: new THREE.Color('#9cbcec') };
 const X = new THREE.Vector3(1, 0, 0);
 const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
@@ -16,7 +24,8 @@ export function toonGradient() {
   t.minFilter = t.magFilter = THREE.NearestFilter; t.needsUpdate = true;
   return t;
 }
-export function outlineMaterial(color = '#0d1233', width = 0.0035) {
+// Same dark navy as the body outline (whale/src/toon.js LINE.color) so the tail edge closes like the skirt hem does.
+export function outlineMaterial(color = '#141a3a', width = 0.0022) {
   const m = new THREE.MeshBasicMaterial({ color, side: THREE.BackSide });
   m.onBeforeCompile = s => {
     s.uniforms.outlineW = { value: width };
@@ -24,16 +33,17 @@ export function outlineMaterial(color = '#0d1233', width = 0.0035) {
   };
   return m;
 }
-function shade(n, v) {
-  const d = n.dot(v);
-  return COL.dorsal.clone().lerp(COL.mid, sstep(-0.25, 0.45, d)).lerp(COL.belly, sstep(0.5, 0.92, d));
+// Hard cel bands by cross-section angle (sin a < 0 is the back of the tail): the back is the darkest value, the flanks
+// step straight up to the mid value, the belly one more step. No interpolation anywhere, so no airbrush gradient.
+function shade(sn) {
+  return sn < -0.55 ? COL.dorsal.clone() : sn > 0.55 ? COL.belly.clone() : COL.mid.clone();
 }
 
-export function createTail({ spine = SPINE, r0 = 0.038, r1 = 0.015, nBones = 7, gradient = toonGradient(), material = null, outline = null } = {}) {
+export function createTail({ spine = SPINE, r0 = 0.036, r1 = 0.0075, nBones = 7, gradient = toonGradient(), material = null, outline = null } = {}) {
   const curve = new THREE.CatmullRomCurve3(spine.map(p => new THREE.Vector3(...p)), false, 'centripetal');
   const L = 72, M = 20;
   const pos = [], nor = [], col = [], si = [], sw = [], idx = [];
-  const radius = t => r1 + (r0 - r1) * Math.pow(1 - t, 1.15) * (1 + 0.15 * Math.sin(Math.PI * t));
+  const radius = t => (r1 + (r0 - r1) * Math.pow(1 - t, 1.5) * (1 + 0.10 * Math.sin(Math.PI * t))) * (0.78 + 0.22 * sstep(0.18, 0.45, t));
   const weights = t => { const f = t * (nBones - 1); const i = Math.min(nBones - 2, Math.floor(f)); const w = f - i; return [i, i + 1, 1 - w, w]; };
   const P = new THREE.Vector3(), T = new THREE.Vector3(), V = new THREE.Vector3(), N = new THREE.Vector3(), Q = new THREE.Vector3();
   for (let i = 0; i <= L; i++) {
@@ -48,7 +58,9 @@ export function createTail({ spine = SPINE, r0 = 0.038, r1 = 0.015, nBones = 7, 
       Q.copy(P).addScaledVector(X, rx * c).addScaledVector(V, rv * sn);
       N.copy(X).multiplyScalar(c / rx).addScaledVector(V, sn / rv).normalize();
       pos.push(Q.x, Q.y, Q.z); nor.push(N.x, N.y, N.z);
-      const k = shade(N, V); col.push(k.r, k.g, k.b);
+      // Baked cel bands: three hard steps around the tube, so it reads as a round tail without any gradient.
+      const k = shade(sn);
+      col.push(k.r, k.g, k.b);
       si.push(b0, b1, 0, 0); sw.push(w0, w1, 0, 0);
     }
   }
@@ -97,7 +109,8 @@ export function createTail({ spine = SPINE, r0 = 0.038, r1 = 0.015, nBones = 7, 
   root.updateMatrixWorld(true);
   const restPos = bones.map(b => b.position.clone());
   // floor clearance of each joint: tube radius (flukes: their droop below the last joint) + 4 mm
-  const clear = bones.map((b, i) => (i === nBones - 1 ? 0.02 : radius(i / (nBones - 1))) + 0.004);
+  // the tube may never come closer than 2 cm to the floor: the test guards that, and the flukes droop about that far
+  const clear = bones.map((b, i) => (i === nBones - 1 ? 0.02 : Math.max(0.02, radius(i / (nBones - 1)))) + 0.004);
   const skeleton = new THREE.Skeleton(bones);
   const mat = material || new THREE.MeshToonMaterial({ vertexColors: true, gradientMap: gradient });
   const meshes = [];
