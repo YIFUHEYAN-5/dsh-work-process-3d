@@ -271,11 +271,31 @@ export function buildEngine(M0) {
   const plate = nameplate(MACHINE_INFO.engine.zh, MACHINE_INFO.engine.en, MACHINE_INFO.engine.code);
   eng.add(mesh(new THREE.PlaneGeometry(0.5, 0.14), plateMaterial(plate.tex, 0.35), [0.76, AXIS_Y + 0.05, 0.628], null, null, { cast: false }));
 
-  // ---------------------------------------------------------- gears
-  const big = mesh(gearGeometry(24, 0.27, 0.31, 0.06, 0.06), M.brass, [1.74, 1.5, 0.08]);
-  const small = mesh(gearGeometry(12, 0.125, 0.165, 0.06, 0.045), M.steel, [1.987, 1.148, 0.08]);
+  // ---------------------------------------------------------- gearbox internals
+  // Two meshed gears on a cut-away glass window, with the shafts they ride on, machined hubs and
+  // spokes. The first drawing had bare gear outlines floating in the window; rims and bearings
+  // make it read as a real reduction gearbox instead of a drawn symbol.
+  const big = mesh(gearGeometry(24, 0.29, 0.33, 0.075, 0.075), M.brass, [1.74, 1.5, -0.02]);
+  const small = mesh(gearGeometry(12, 0.145, 0.185, 0.075, 0.06), M.steel, [1.987, 1.148, -0.02]);
   const BIG0 = -7 * DEG;
   const SMALL0 = -4 * DEG;
+  const gearKit = new Kit();
+  gearKit.add('aluDark', tf(cyl(0.2, 0.2, 0.1, 40), [1.74, 1.5, -0.03], [Math.PI / 2, 0, 0]));
+  gearKit.add('aluDark', tf(cyl(0.1, 0.1, 0.1, 32), [1.987, 1.148, -0.03], [Math.PI / 2, 0, 0]));
+  for (let i = 0; i < 5; i++) {
+    const a = (i / 5) * TAU;
+    gearKit.add('chrome', tf(box(0.19, 0.03, 0.035), [1.74 + Math.cos(a) * 0.12, 1.5 + Math.sin(a) * 0.12, -0.06], [0, 0, a]));
+  }
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * TAU;
+    gearKit.add('chrome', tf(box(0.11, 0.025, 0.03), [1.987 + Math.cos(a) * 0.06, 1.148 + Math.sin(a) * 0.06, -0.06], [0, 0, a]));
+  }
+  gearKit.add('chrome', tf(cyl(0.028, 0.028, 0.34, 20), [1.86, 1.33, -0.16], [Math.PI / 2, 0, 0]));
+  gearKit.add('chrome', tf(cyl(0.022, 0.022, 0.2, 16), [1.74, 0.98, -0.16], [Math.PI / 2, 0, 0]));
+  gearKit.add('aluDark', tf(box(0.06, 0.44, 0.05), [1.462, 1.5, -0.2]));
+  gearKit.add('aluDark', tf(box(0.04, 0.3, 0.05), [2.16, 1.148, -0.2]));
+  gearKit.add('steel', tf(box(0.6, 0.018, 0.035), [1.8, 0.72, -0.05]));
+  eng.add(gearKit.build(M, { name: 'gearbox-internals' }));
   eng.add(big, small);
   eng.add(mesh(new THREE.PlaneGeometry(0.62, 1.1), M.glass, [1.8, 1.36, 0.3], null, null, { cast: false, receive: false }));
 

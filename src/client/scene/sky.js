@@ -360,15 +360,19 @@ void planetLayer(vec3 d, float tR, float q, float fw, float px, inout vec3 space
   vec3 n = normalize(H - uPlanetP);
   float mixv = uPlanet.z;
 
-  // Cloud bands follow the latitude, stirred by a little noise.
+  // A distant ice giant: muted, desaturated bands rather than a saturated toy marble, one long
+  // storm oval so the disc has a readable feature, and a visible night side instead of a hard
+  // half-lit ball.
   float lat = dot(n, uPlanetA);
   float turb = skyNoise(n * 5.0 + 2.0) * 0.6 + skyNoise(n * 13.0) * 0.25;
   float w = lat * 7.5 + turb * 0.9;
   float b1 = 0.5 + 0.5 * sin(w * 6.2832);
   float b2 = 0.5 + 0.5 * sin(w * 15.0 + turb * 3.0);
-  vec3 alb = mix(vec3(0.36, 0.44, 0.66), vec3(0.78, 0.85, 0.93), b1);
-  alb = mix(alb, vec3(0.58, 0.5, 0.74), 0.3 * b2);
-  alb *= 0.82 + 0.18 * (1.0 - lat * lat);
+  vec3 alb = mix(vec3(0.29, 0.31, 0.38), vec3(0.62, 0.62, 0.6), b1);
+  alb = mix(alb, vec3(0.44, 0.4, 0.46), 0.35 * b2);
+  alb *= 0.8 + 0.2 * (1.0 - lat * lat);
+  vec3 stormC = normalize(uPlanetA + 0.42 * cross(uPlanetA, vec3(0.0, 1.0, 0.0)) + vec3(0.16, 0.0, 0.1));
+  alb = mix(alb, vec3(0.58, 0.46, 0.4), 0.55 * smoothstep(0.55, 0.95, dot(n, stormC)));
   float ndl = dot(n, uPlanetL);
   float lit = smoothstep(-0.06, 0.32, ndl) * (0.4 + 0.6 * max(ndl, 0.0));
   // The rings cast a shadow band on the disc.
@@ -378,9 +382,12 @@ void planetLayer(vec3 d, float tR, float q, float fw, float px, inout vec3 space
     if (sh > 0.0) lit *= 1.0 - 0.75 * ringDensity(length(H + uPlanetL * sh - uPlanetP) / r, 0.02);
   }
   float limb = 0.55 + 0.45 * pow(max(dot(n, -d), 0.0), 0.5);
-  vec3 pc = alb * (lit * limb * uPlanet.y * 1.5 + 0.012);
+  float night = 0.045 + 0.03 * max(dot(n, -d), 0.0);
+  vec3 pc = alb * (lit * limb * uPlanet.y * 1.5 + night);
+  pc = mix(pc, pc * vec3(0.72, 0.82, 1.15), smoothstep(-0.35, 0.2, ndl) * (1.0 - smoothstep(0.2, 0.65, ndl)));
 
-  // Rings, lit from either face and glowing when the light comes from behind them.
+  // Rings: warm-grey ice and dust in radial bands, lit from either face and glowing when the
+  // light comes from behind them.
   float ringA = 0.0;
   vec3 ringC = vec3(0.0);
   if (tR > 0.0) {
@@ -390,9 +397,12 @@ void planetLayer(vec3 d, float tR, float q, float fw, float px, inout vec3 space
       float bl = dot(v, uPlanetL);
       float shadow = 1.0;
       if (bl < 0.0) shadow = smoothstep(r * r * 0.92, r * r * 1.08, dot(v, v) - bl * bl);
-      float rlit = 0.22 + 0.78 * abs(dL);
+      float rlit = 0.12 + 0.88 * abs(dL);
       float fwd = pow(max(dot(d, uPlanetL), 0.0), 6.0);
-      ringC = vec3(0.86, 0.84, 0.8) * ((rlit + 1.4 * fwd) * shadow * uPlanet.y * 1.2 + 0.006);
+      float band = 0.72 + 0.28 * sin(q * 6.1 + 1.3);
+      vec3 ringAlb = mix(vec3(0.52, 0.47, 0.42), vec3(0.78, 0.74, 0.68), band);
+      ringC = ringAlb * ((rlit * (0.6 + 0.4 * band) + 1.1 * fwd) * shadow * uPlanet.y + 0.004);
+      ringC += vec3(0.5, 0.55, 0.62) * fwd * 0.25 * shadow * uPlanet.y;
     }
   }
   bool front = disc < 0.0 || tR < tP;

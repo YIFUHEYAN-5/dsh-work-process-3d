@@ -435,6 +435,30 @@ export function buildLiving(M) {
     add('leaf', sphere(0.15, 12, 8), [c[0] + 1.1, c[1] + 1.15, c[2]], [0, 0, 0], [1, 0.9, 1]);
   }
 
+  // ── Glass screens at the ends of the deck ──────────────────
+  // The deck is open to the hall at +z and to the city at −z; its short ends get frameless
+  // glazing in a slim frame, so the quarters read as a room rather than as furniture standing
+  // loose on the roof deck.
+  {
+    const H = 3.1;
+    const zc = 0.0;
+    const len = DECK.z1 - DECK.z0;
+    for (const sx of [-1, 1]) {
+      const x = sx * (DECK.x1 + 0.08);
+      add('white', box(0.07, 0.09, len + 0.16), [x, TOP + H, zc]);
+      add('white', box(0.07, H, 0.09), [x, TOP + H / 2, DECK.z0 - 0.02]);
+      add('white', box(0.07, H, 0.09), [x, TOP + H / 2, DECK.z1 + 0.02]);
+      add('chrome', box(0.06, 0.04, len), [x, TOP + 0.02, zc]);
+      const pane = new THREE.Mesh(new THREE.PlaneGeometry(len, H - 0.06), M.glass);
+      pane.position.set(x, TOP + H / 2, zc);
+      pane.rotation.y = Math.PI / 2;
+      pane.name = 'living-glass';
+      root.add(pane);
+      // A lit hand-rail line inside the glass, matching the rest of the deck.
+      add('warm', box(0.02, 0.012, len - 0.1), [x - sx * 0.045, TOP + 1.02, zc]);
+    }
+  }
+
   // ── Potted plants ───────────────────────────────────────────
   for (const [x, z, s] of [[-4.55, 0.4, 1], [4.55, -0.35, 0.85], [1.55, 2.55, 0.7]]) {
     add('white', cyl(0.27 * s, 0.21 * s, 0.5 * s, 28), [x, TOP + 0.25 * s, z]);
@@ -466,6 +490,8 @@ export function buildLiving(M) {
     solidBox('aquarium', 1.08, 1.56, 1.08, [tank.x, 0, tank.z]),
     solidBox('bookshelf', 3.62, 0.95, 0.46, [0.6, 0, 3.02]),
     solidBox('desk', 1.62, 1.6, 0.8, [3.4, 0, -2.05]),
+    solidBox('screen-left', 0.16, 3.1, DECK.z1 - DECK.z0, [-DECK.x1 - 0.08, 0, 0]),
+    solidBox('screen-right', 0.16, 3.1, DECK.z1 - DECK.z0, [DECK.x1 + 0.08, 0, 0]),
   );
   const proxy = new THREE.Mesh(new THREE.BoxGeometry(DECK.x1 - DECK.x0, 1.2, DECK.z1 - DECK.z0), HIDDEN);
   proxy.position.set(0, 0.6, 0);
