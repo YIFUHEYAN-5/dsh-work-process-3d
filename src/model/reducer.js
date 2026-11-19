@@ -437,7 +437,7 @@ export function reduce(state, event) {
         id,
         name,
         kind,
-        label: describeToolCall(name, args),
+        label: describeToolCall(args),
         turn: lastTurn(s).no,
         startedAt: time,
         endedAt: 0,

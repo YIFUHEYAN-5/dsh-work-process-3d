@@ -479,7 +479,7 @@ function buildChamber(M, { center, side, zh, en, code, hubDoorX }) {
 }
 
 /** Air-track rail from a to b (world, y = rail top). */
-function airTrack(M, kit, a, b, width = 0.36) {
+function airTrack(kit, a, b, width = 0.36) {
   const dx = b.x - a.x;
   const dz = b.z - a.z;
   const len = Math.hypot(dx, dz);
@@ -535,8 +535,8 @@ export function buildCell(M) {
   const inEnd = new THREE.Vector3(lockCenter.x - 0.42, 0, TRACK_Z);
   const outStart = new THREE.Vector3(outCenter.x + 0.42, 0, TRACK_Z);
   const outEnd = new THREE.Vector3(7.18, 0, TRACK_Z);
-  airTrack(M, kit, inStart, inEnd);
-  airTrack(M, kit, outStart, outEnd);
+  airTrack(kit, inStart, inEnd);
+  airTrack(kit, outStart, outEnd);
   // Short bridges from the hub-side doors to the pedestals.
   const bridge = (from, to) => {
     const dx = to.x - from.x;

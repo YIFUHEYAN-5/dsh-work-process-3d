@@ -37,15 +37,6 @@ export function gridToWorld(qx, qz, out = [0, 0]) {
   return out;
 }
 
-/** World x/z → grid frame. */
-export function worldToGrid(x, z, out = [0, 0]) {
-  const dx = x - ATRIUM.cx;
-  const dz = z - ATRIUM.cz;
-  out[0] = GC * dx - GS * dz;
-  out[1] = GS * dx + GC * dz;
-  return out;
-}
-
 /** World position at an atrium angle (same convention as layout.arcPoint) and radius. */
 export function polar(a, r, out = [0, 0]) {
   out[0] = ATRIUM.cx + r * Math.cos(a);

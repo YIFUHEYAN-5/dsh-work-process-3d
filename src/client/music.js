@@ -25,7 +25,6 @@ const SUSPEND_AFTER_MS = 1600;
 const CUE_GAP = 5; // seconds between two turn chimes at most
 
 export const DEFAULT_VOLUME = 0.5;
-export const MUSIC_STATES = ['unsupported', 'off', 'locked', 'paused', 'playing'];
 
 // Mix levels. The output gain is volume² × OUTPUT_GAIN (a perceptual volume curve); the
 // compressor behind it keeps peaks in check.

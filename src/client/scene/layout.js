@@ -22,7 +22,7 @@ export const RAIL = { r: 21.97, h: 1.1 };
  * pool in the middle and sun decks on both sides. The balustrade follows its sides and outer
  * arc, except along the pool's infinity edge.
  */
-export const BALCONY = { a0: 232 * DEG, a1: 308 * DEG, r0: 22.0, r1: 31.0, slab: 0.6, rail: 1.1 };
+export const BALCONY = { a0: 232 * DEG, a1: 308 * DEG, r0: 22.0, r1: 31.0, slab: 0.6 };
 
 /**
  * Sky pool: an annular-sector basin in the balcony deck. The water stands just below the deck;

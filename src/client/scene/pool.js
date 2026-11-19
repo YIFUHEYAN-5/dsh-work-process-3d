@@ -16,7 +16,6 @@ import { MACHINE_INFO } from '../../model/stations.js';
  */
 
 const TAU = Math.PI * 2;
-const SPAN = POOL.a1 - POOL.a0;
 const KNIFE = 0.05; // thickness of the knife edge
 const KNIFE_Y = POOL.water - 0.012; // the water runs over it
 const TROUGH_IN = POOL.r1 + KNIFE;

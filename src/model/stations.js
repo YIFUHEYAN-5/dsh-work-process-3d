@@ -100,7 +100,7 @@ function firstString(a, keys) {
 }
 
 /** Short human label for a tool call: file name, command, query, URL host or description. */
-export function describeToolCall(name, args) {
+export function describeToolCall(args) {
   const a = parseArgs(args);
   const path = firstString(a, ['file_path', 'path', 'filePath', 'files']);
   if (path) return clip(basename(path) || path);

@@ -30,12 +30,14 @@ export const CAMERA_PRESETS = {
   dock: { pos: [-1.0, 3.3, -6.6], target: [-5.3, 1.8, -5.0] },
   products: { pos: [6.1, 2.9, 5.6], target: [8.3, 1.1, 0.4] },
   // Standing on the balcony behind the sky pool, looking out between the sunset and the ringed
-  // planet.
-  balcony: { pos: [-0.3, 1.6, 22.0], target: [-3.08, 2.3, 41.8], mode: 'look' },
-  // From the edge of the hall, low over the pool water toward the infinity edge and the sunset.
-  pool: { pos: [6.13, 1.4, 19.02], target: [2.94, 0.5, 26.9] },
+  // planet. Aimed above the horizon line so the deck, the water and both bodies stay clear of
+  // the readout row along the bottom of the view.
+  balcony: { pos: [-0.3, 1.9, 21.4], target: [-3.08, 6.4, 41.8], mode: 'look' },
+  // From the edge of the hall, higher over the pool water toward the infinity edge and the sunset,
+  // framing the pool surface and the loungers above the readout row.
+  pool: { pos: [6.4, 3.4, 18.2], target: [2.94, 1.1, 26.6] },
   // Behind the media wall: the living quarters, seen from the right with the city behind.
-  living: { pos: [5.6, 3.3, -14.6], target: [0.5, 0.9, -17.2] },
+  living: { pos: [6.0, 3.9, -14.0], target: [0.4, 1.4, -17.4] },
 };
 
 /**
@@ -99,7 +101,7 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
   const reflection = reflCfg ? createReflection(gl, reflCfg) : null;
 
   const { M, tex } = createMaterials(quality);
-  const stage = buildStage(M, tex, quality, {
+  const stage = buildStage(M, quality, {
     renderer: gl,
     look: lookDef,
     reflection,
@@ -118,7 +120,7 @@ export function buildWorld(renderer, quality, { environment = true, demo: demoIn
   const stations = buildStations(M, fx);
   const wafers = createWaferKit(M);
   const stocker = buildStocker(M, wafers);
-  const screens = buildScreens(M, null, { demo });
+  const screens = buildScreens(M, { demo });
   const channels = buildChannels();
   const living = buildLiving(M);
   // Drones collect their task capsule above the cobot station (subagent and workflow calls).
