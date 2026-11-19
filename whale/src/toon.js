@@ -11,6 +11,10 @@ export const TOON = { light: [0.45, 0.85, 0.6], shadow: [0.74, 0.76, 0.93], skin
 // outline colours: clothes and everything without zones, hair, skin
 export const LINE = { color: 0x141a3a, hair: 0x1e265c, skin: 0x603834 };
 
+// Smooth one-dimensional value noise, used for the hair band: the azimuth picks a random height per lock without the
+// hard step a hashed sector would leave.
+const WH1 = 'float wh1( float x ) {\n\tfloat i = floor( x ), f = fract( x );\n\tf = f * f * ( 3.0 - 2.0 * f );\n\treturn mix( fract( sin( ( i + 3.7 ) * 127.1 ) * 43758.5453 ), fract( sin( ( i + 4.7 ) * 127.1 ) * 43758.5453 ), f );\n}';
+
 const FRAG = [
   'vec3 Lv = normalize( ( viewMatrix * vec4( uLight, 0.0 ) ).xyz );',
   'float lit = smoothstep( uThr - uSoft, uThr + uSoft, dot( normal, Lv ) * 0.5 + 0.5 );',
@@ -31,7 +35,7 @@ const FRAG = [
   // cap the lock luminance so nothing can clip to white, and drop the rim on hair entirely (the rim was what pushed the
   // brightest texels to pure white).
   'float hairL = dot( base, vec3( 0.2126, 0.7152, 0.0722 ) );',
-  'base *= mix( 1.0, min( 1.0, 0.72 / max( hairL, 1e-3 ) ), hairW );',
+  'base *= mix( 1.0, min( 1.0, 0.60 / max( hairL, 1e-3 ) ), hairW );',
   'float rim = smoothstep( 0.62, 0.9, 1.0 - max( dot( normal, normalize( vViewPosition ) ), 0.0 ) ) * uRim * ( 1.0 - hairW );',
   'vec3 lit3 = mix( shade, base, lit ) + rim * mix( base, vec3( 1.0 ), 0.6 ) * ( 0.35 + 0.65 * lit );',
   // The cel highlight band cannot come from the texture (Tripo bakes one blob on the crown) nor from N.L (the back of the
@@ -41,26 +45,26 @@ const FRAG = [
   // field is smooth at any zoom, and fwidth() gives it a one-pixel edge.
   '#ifdef USE_TOON_BAND',
   'float bandV = 0.0;',
-  'vec3 bandCol = vec3( 0.31, 0.40, 0.85 );',
+  'vec3 bandCol = vec3( 0.21, 0.33, 0.80 );',
   '{',
   '  float th = atan( vObjPos.x, vObjPos.z );',
-  // One random offset per lock. A plain function of the azimuth puts the band at the same height on every lock, which
-  // reads as a brim; quantising the azimuth into sectors and hashing the sector gives each lock its own phase, and the
-  // steps land on the white seams where the locks already separate.
-  '  float sec = floor( ( th + 3.14159265 ) * 2.2 );',
-  '  float ar = fract( sin( sec * 12.9898 + 4.1 ) * 43758.5453 );',
-  '  float yb = 0.826 + 0.009 * sin( 5.0 * th ) + ( ar - 0.5 ) * 0.050;',
+  // The band has to wander from lock to lock, but a hashed sector per lock put a 50 px vertical step between neighbours
+  // and cut the soft highlight into shards. Continuous value noise along the azimuth does the same job with a slope:
+  // the sum has a 30-40 degree period, so each lock settles at its own height and the edges still rise and fall smoothly.
+  '  float yb = 0.826 + 0.030 * ( ( wh1( 2.1 * th ) + 0.5 * wh1( 3.7 * th + 1.7 ) ) / 1.5 - 0.5 );',
   '  float d = vObjPos.y - yb;',
   '  float aa = fwidth( d ) * 1.2 + 0.0008;',
-  '  bandV = smoothstep( -0.042 - aa, -0.034 + aa, d ) * ( 1.0 - smoothstep( 0.038 - aa, 0.046 + aa, d ) );',
-  // Flat colour across the whole crown reads as a painted brim, so keep the band off surfaces that face the camera and
-  // give the inside a little tonal grit.
+  '  bandV = smoothstep( -0.015 - aa, -0.015 + aa, d ) * ( 1.0 - smoothstep( 0.013 - aa, 0.013 + aa, d ) );',
+  // Flat colour across the whole crown reads as a painted brim, so keep the band off surfaces that face the camera.
   '  float nv = abs( dot( normalize( normal ), normalize( vViewPosition ) ) );',
-  // Each lock also gets its own strength, so the belt breaks into a row of separate highlights instead of one ring.
   '  bandV *= ( 0.35 + 0.65 * smoothstep( 0.10, 0.35, nv ) ) * hairW;',
-  '  bandV *= 0.68 + 0.32 * ( 0.5 + 0.5 * sin( sec * 4.7 + 1.3 ) );',
+  // Strength varies smoothly too, so the belt breaks into separate highlights instead of one ring around the head.
+  '  bandV *= 0.75 + 0.25 * wh1( 3.7 * th );',
+  // The fringe faces the camera in every view and already sits on the baked crown highlight; damp it there so the band
+  // does not frame the face as a pale patch.
+  '  bandV *= mix( 1.0, 0.45, step( 0.86, vObjPos.y ) * step( abs( vObjPos.z ), 0.10 ) );',
   '  float grit = fract( sin( dot( vObjPos, vec3( 91.7, 137.1, 71.3 ) ) ) * 43758.5453 );',
-  '  bandCol *= ( 0.84 + 0.18 * smoothstep( 0.10, 0.60, bandV ) ) * ( 0.95 + 0.10 * grit );',
+  '  bandCol *= ( 0.90 + 0.14 * smoothstep( 0.10, 0.60, bandV ) ) * ( 0.97 + 0.06 * grit );',
   '}',
   'lit3 = mix( lit3, bandCol, clamp( bandV, 0.0, 1.0 ) * 0.92 );',
   // The tips bake a light blue gradient, and a 10 px pale triangle on an otherwise pointed tip reads as lining turned
@@ -90,7 +94,7 @@ export function toonMaterial({ map = null, color = 0xffffff, vertexColors = fals
     if (zones) s.vertexShader = 'attribute vec4 toon;\nvarying vec4 vToon;\n' + s.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvToon = toon;');
     if (band) s.vertexShader = 'varying vec3 vObjPos;\n' + s.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvObjPos = position;');
     s.fragmentShader = 'uniform vec3 uLight;\nuniform vec3 uShadow, uSkinShadow;\nuniform float uThr, uSoft, uRim, uSat, uVib;\n'
-      + (zones ? 'varying vec4 vToon;\n' : '') + (band ? 'varying vec3 vObjPos;\n' : '')
+      + (zones ? 'varying vec4 vToon;\n' : '') + (band ? 'varying vec3 vObjPos;\n' + WH1 + '\n' : '')
       + s.fragmentShader.replace(LIGHT_LINE, FRAG);
   };
   m.customProgramCacheKey = () => 'whale-toon' + (zones ? '-z' : '') + (band ? '-b' : '');
