@@ -36,9 +36,9 @@ test('tools map to stations', () => {
   assert.equal(stationKindOf('ask_user_question'), 'beacon');
   assert.equal(stationKindOf('present'), 'labeler');
   assert.equal(stationKindOf('plugin_manager'), 'generic');
-  assert.equal(describeToolCall('read', { file_path: 'D:\\a\\b\\c.js' }), 'c.js');
-  assert.equal(describeToolCall('pwsh', '{"command":"\\n pnpm test\\nmore"}'), 'pnpm test');
-  assert.equal(describeToolCall('web_fetch', { url: 'https://threejs.org/docs/' }), 'threejs.org');
+  assert.equal(describeToolCall({ file_path: 'D:\\a\\b\\c.js' }), 'c.js');
+  assert.equal(describeToolCall('{"command":"\\n pnpm test\\nmore"}'), 'pnpm test');
+  assert.equal(describeToolCall({ url: 'https://threejs.org/docs/' }), 'threejs.org');
   assert.deepEqual(estimateFileChange('edit', { file_path: 'a.js', old_string: 'x\ny\nz', new_string: 'x\nY\nQ\nz' }), { path: 'a.js', added: 2, removed: 1 });
   assert.deepEqual(estimateFileChange('write', { file_path: 'b.md', content: '1\n2\n3' }), { path: 'b.md', added: 3, removed: 0 });
 });

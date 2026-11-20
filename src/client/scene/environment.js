@@ -96,11 +96,11 @@ export function blobShadow(M, w, d, p, opacity = 0.55) {
 }
 
 /**
- * buildStage(M, tex, quality, { renderer, look, reflection, beamTarget }) → { root, key, sky,
+ * buildStage(M, quality, { renderer, look, reflection, beamTarget }) → { root, key, sky,
  * pool, reflectors, bounds, envTexture, update(dt, t, info), setLook(look),
  * setReducedMotion(on) }.
  */
-export function buildStage(M, tex, quality, { renderer = null, look, reflection = null, beamTarget } = {}) {
+export function buildStage(M, quality, { renderer = null, look, reflection = null, beamTarget } = {}) {
   const root = new THREE.Group();
   root.name = 'stage';
 

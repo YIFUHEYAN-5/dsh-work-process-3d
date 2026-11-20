@@ -74,7 +74,7 @@ export const LOOKS = {
       twinkle: 0.6,
       meteors: 1 / 40,
       // Lit by the low sun behind it: a thin crescent and a dark disc against the blue sky.
-      planet: { light: 'sun', sun: 0.55, air: 0.42, mix: 1 },
+      planet: { sun: 0.55, air: 0.42, mix: 1 },
       moon: { sun: 0.75, mix: 0.9 },
     },
     city: {
@@ -137,7 +137,7 @@ export const LOOKS = {
       milky: 0,
       twinkle: 0,
       meteors: 0,
-      planet: { light: 'sun', sun: 1.0, air: 0.8, mix: 0.7 },
+      planet: { sun: 1.0, air: 0.8, mix: 0.7 },
       moon: { sun: 1.0, mix: 0.55 },
     },
     city: {

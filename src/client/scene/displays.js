@@ -73,30 +73,6 @@ export function gaugeFace({ title, sub, labels, redFrom = 0.8, accent = '#4d6bfe
   });
 }
 
-/** Digit strip for odometer drums; cells run along the circumference (u). */
-export function drumStrip(width, radius, { inverted = false } = {}) {
-  const W = 1024;
-  const H = Math.max(64, Math.round((W * width) / (TAU * radius)));
-  return canvasTexture(W, H, (g) => {
-    g.fillStyle = inverted ? '#e9e6dc' : '#101114';
-    g.fillRect(0, 0, W, H);
-    g.fillStyle = inverted ? '#141414' : '#f1efe8';
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.font = `700 ${Math.round(W / 10 * 0.62)}px ${FONT_MONO}`;
-    for (let d = 0; d < 10; d++) {
-      g.save();
-      g.translate((d + 0.5) * (W / 10), H / 2);
-      g.rotate(-Math.PI / 2);
-      g.fillText(String(d), 0, 2);
-      g.restore();
-    }
-    // subtle separators between digits
-    g.fillStyle = 'rgba(0,0,0,0.35)';
-    for (let d = 0; d <= 10; d++) g.fillRect(d * (W / 10) - 1, 0, 2, H);
-  }, { anisotropy: 8 });
-}
-
 /** Engraved station nameplate. */
 export function nameplate(zh, en, code, accent = '#4d6bfe') {
   return canvasTexture(512, 144, (g, w, h) => {
@@ -242,24 +218,6 @@ export function scaleStrip() {
       const major = i % 10 === 0;
       g.fillRect(w - (major ? 46 : 26), y - (major ? 2 : 1), major ? 46 : 26, major ? 4 : 2);
       if (major) g.fillText(String(i * 2), w - 52, y);
-    }
-  });
-}
-
-/** Big backlit sign letters: white on black, used as emissive map. */
-export function signTexture(text, sub) {
-  return canvasTexture(2048, 256, (g, w, h) => {
-    g.fillStyle = '#000000';
-    g.fillRect(0, 0, w, h);
-    g.textAlign = 'center';
-    g.textBaseline = 'middle';
-    g.fillStyle = '#ffffff';
-    fitText(g, text, w - 120, 120, 800, FONT_SANS);
-    g.fillText(text, w / 2, sub ? h * 0.4 : h / 2);
-    if (sub) {
-      g.fillStyle = '#9fb4ff';
-      fitText(g, sub, w - 200, 44, 600, FONT_SANS);
-      g.fillText(sub, w / 2, h * 0.82);
     }
   });
 }

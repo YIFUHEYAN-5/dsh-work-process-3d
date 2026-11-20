@@ -21,7 +21,12 @@ export const screenYaw = (a) => Math.atan2(-Math.cos(a), Math.sin(a));
 /** Atrium angle of the point u metres to the viewer's right of the screen centre. */
 export const screenAngle = (def, u) => def.a - u / MEDIA.screenR;
 
-/** Distance from the screen centre at which the whole curved screen fits the view with a margin. */
+/**
+ * Distance from the screen centre at which the whole curved screen fits the view with a margin.
+ * The vertical margin is generous (about 16 % top and bottom): the close-up puts a bar with the
+ * screen name and the step buttons along the bottom of the view, and the last row of the screen
+ * (the recent tool calls and the running wafer) has to clear it.
+ */
 export function screenFit(def, fovDeg, aspect) {
   const { tv, th } = halfTans(fovDeg, aspect);
   const span = def.a1 - def.a0;
@@ -29,7 +34,7 @@ export function screenFit(def, fovDeg, aspect) {
   const chord = 2 * R * Math.sin(span / 2);
   const sag = R * (1 - Math.cos(span / 2)); // the edges are this much closer than the centre
   const h = def.y1 - def.y0;
-  return clamp(Math.max(sag + ((chord / 2) * 1.08) / th, sag + ((h / 2) * 1.22) / tv), SCREEN_MIN_D + 0.4, 16);
+  return clamp(Math.max(sag + ((chord / 2) * 1.08) / th, sag + ((h / 2) * 1.32) / tv), SCREEN_MIN_D + 0.4, 18);
 }
 
 /**

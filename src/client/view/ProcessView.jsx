@@ -1718,19 +1718,19 @@ export function ProcessView(props) {
 
       {hud && panelsOn && !screenId ? (
         <div className="dwp3d-bottom">
-          <div className="dwp3d-mid">
+          <div className="dwp3d-strip">
             <Ticker t={t} calls={recent} />
+            <div className="dwp3d-cards">
+              {cards.map((c) => (
+                <Card key={c.id} card={c} uid={uid} onTip={onCardTip} />
+              ))}
+            </div>
             <Legend
               t={t}
               hintOn={camMode === 'look' ? lookHintOn : hintOn}
               hintKey={camMode === 'look' ? 'hint.look' : 'hint.controls'}
               onDismiss={dismissHint}
             />
-          </div>
-          <div className="dwp3d-cards">
-            {cards.map((c) => (
-              <Card key={c.id} card={c} uid={uid} onTip={onCardTip} />
-            ))}
           </div>
         </div>
       ) : null}

@@ -246,7 +246,7 @@ function drawFlow(g, w, h, d) {
   chrome(g, w, h, COL.cyan);
 }
 
-function kpi(g, x, y, w, zh, en, value, sub, color) {
+function kpi(g, x, y, zh, en, value, sub, color) {
   label(g, x, y, zh, en);
   g.textAlign = 'left';
   g.textBaseline = 'alphabetic';
@@ -308,11 +308,11 @@ function drawMain(g, w, h, d) {
   const ph = PHASE[d.phase] || PHASE.idle;
   const cw = (w - 80) / 5;
   const ky = 148;
-  kpi(g, 40, ky, cw, '阶段', 'PHASE', ph.zh, ph.en, ph.color);
-  kpi(g, 40 + cw, ky, cw, '轮次', 'TURN', d.turn ? `T${d.turn}` : '—', `合格 ${d.ok} · 返工 ${d.rework}`, COL.text);
-  kpi(g, 40 + cw * 2, ky, cw, '工具调用', 'TOOL CALLS', String(d.calls), `成功率 ${formatPct(d.toolSuccess)}`, COL.cyan);
-  kpi(g, 40 + cw * 3, ky, cw, '产出文件', 'FILES', String(d.files), `+${d.added} / −${d.removed}`, COL.gold);
-  kpi(g, 40 + cw * 4, ky, cw, '模型请求', 'REQUESTS', String(d.requests), `运行中 ${d.running}`, COL.blue);
+  kpi(g, 40, ky, '阶段', 'PHASE', ph.zh, ph.en, ph.color);
+  kpi(g, 40 + cw, ky, '轮次', 'TURN', d.turn ? `T${d.turn}` : '—', `合格 ${d.ok} · 返工 ${d.rework}`, COL.text);
+  kpi(g, 40 + cw * 2, ky, '工具调用', 'TOOL CALLS', String(d.calls), `成功率 ${formatPct(d.toolSuccess)}`, COL.cyan);
+  kpi(g, 40 + cw * 3, ky, '产出文件', 'FILES', String(d.files), `+${d.added} / −${d.removed}`, COL.gold);
+  kpi(g, 40 + cw * 4, ky, '模型请求', 'REQUESTS', String(d.requests), `运行中 ${d.running}`, COL.blue);
 
   // Recent tool calls as a strip of blocks, newest on the right.
   const sy = 330;
@@ -427,10 +427,10 @@ const DRAW = { flow: drawFlow, main: drawMain, cost: drawCost };
 // ── Scene objects ───────────────────────────────────────────────
 
 /**
- * buildScreens(M, glow, { demo }) → { root, update(dt, t, info), hover, setDetail(id, scale), setDemo(on), reset() }.
+ * buildScreens(M, { demo }) → { root, update(dt, t, info), hover, setDetail(id, scale), setDemo(on), reset() }.
  * info: { state, live, tps, peak }.
  */
-export function buildScreens(M, glow, { demo: demoInit = false } = {}) {
+export function buildScreens(M, { demo: demoInit = false } = {}) {
   let demo = !!demoInit;
   const root = new THREE.Group();
   root.name = 'screens';
