@@ -38,7 +38,7 @@ function fakeCanvas(width, height) {
 setCanvasFactory(fakeCanvas);
 const { buildWorld } = await import('../src/client/scene/world.js');
 const { createCameraSpace, CAMERA_PAD, TARGET_CLEARANCE } = await import('../src/client/scene/camspace.js');
-const { ATRIUM, MEDIA, WELL, CAMERA_LIMIT, arcPoint, cameraRegion } = await import('../src/client/scene/layout.js');
+const { ATRIUM, MEDIA, WELL, POOL, RAIL, BALCONY, CAMERA_LIMIT, arcPoint, cameraRegion } = await import('../src/client/scene/layout.js');
 
 const world = buildWorld(null, 'medium', { environment: false });
 const space = createCameraSpace(world.solids);
@@ -89,7 +89,7 @@ test('a roaming step into a wall or a machine ends outside it, still in the hall
   }
 });
 
-test('the orbit arm stops in front of the wall and at the glass', () => {
+test('the orbit arm stops in front of the wall and at the edge of the walkable space', () => {
   const T = arcPoint(MID, 8, 4);
   const outward = new THREE.Vector3(Math.cos(MID), 0, -Math.sin(MID));
   const len = space.armLength(T, outward, 12);
@@ -104,21 +104,35 @@ test('the orbit arm stops in front of the wall and at the glass', () => {
   assert.ok(space.armLength(hub, dir, d) < d - 0.2, 'pulled in front of the station');
   assert.ok(near(space.armLength(hub, dir, d, CAMERA_PAD, false), d), 'no walls in between');
   assert.ok(space.armLength(hub, dir, d + 6) > d, 'a camera beyond the station is not pulled in front of it');
-  // The hall: glass radius, floor and ceiling heights.
+  // The walkable space: the hall disc beside the balustrade, the balcony sector out to its
+  // walkway, the floor and the height limit under the open sky. The exit is found by
+  // marching and bisection, so it is exact to about a millimetre.
   const centre = new THREE.Vector3(ATRIUM.cx, 3, ATRIUM.cz);
-  assert.ok(near(space.containerExit(centre, new THREE.Vector3(1, 0, 0)), CAMERA_LIMIT.r));
-  assert.ok(near(space.containerExit(centre, new THREE.Vector3(0, 1, 0)), CAMERA_LIMIT.yMax - 3));
-  assert.ok(near(space.containerExit(centre, new THREE.Vector3(0, -1, 0)), 3 - CAMERA_LIMIT.yMin));
+  const mm = 2e-3;
+  assert.ok(near(space.containerExit(centre, new THREE.Vector3(1, 0, 0)), CAMERA_LIMIT.r, mm), 'hall edge');
+  assert.ok(near(space.containerExit(centre, new THREE.Vector3(0, 0, 1)), CAMERA_LIMIT.balconyR, mm), 'balcony edge');
+  assert.ok(near(space.containerExit(centre, new THREE.Vector3(0, 1, 0)), CAMERA_LIMIT.yMax - 3, mm), 'height limit');
+  assert.ok(near(space.containerExit(centre, new THREE.Vector3(0, -1, 0)), 3 - CAMERA_LIMIT.yMin, mm), 'floor');
+  assert.equal(space.containerExit(new THREE.Vector3(ATRIUM.cx + 40, 3, ATRIUM.cz), new THREE.Vector3(-1, 0, 0)), 0, 'outside');
 });
 
-test('zoom finds the floor, the data pool, the ceiling and the screens', () => {
+test('zoom finds the floor, the data pool, the sky pool, the balustrade and the screens', () => {
   const down = new THREE.Vector3(0, -1, 0);
+  const up = new THREE.Vector3(0, 1, 0);
   assert.ok(near(space.surfaceHit(new THREE.Vector3(2.6, 5, -1), down), 5), 'island top');
   assert.ok(near(space.surfaceHit(new THREE.Vector3(6, 5, -5), down), 5 + WELL.depth), 'data pool');
-  assert.ok(near(space.surfaceHit(new THREE.Vector3(2.6, 5, -1), new THREE.Vector3(0, 1, 0)), ATRIUM.h - 5), 'ceiling');
+  const overPool = arcPoint((POOL.a0 + POOL.a1) / 2, (POOL.r0 + POOL.r1) / 2, 5);
+  assert.ok(near(space.surfaceHit(overPool, down), 5 - POOL.water), 'pool water');
+  assert.equal(space.surfaceHit(new THREE.Vector3(2.6, 5, -1), up), Infinity, 'the roof is open');
   const T = arcPoint(MID, 6, MEDIA.screenY);
   const outward = new THREE.Vector3(Math.cos(MID), 0, -Math.sin(MID));
   assert.ok(near(space.surfaceHit(T, outward), MEDIA.screenR - 6, 1e-4), 'screen front');
+  // The glass balustrade around the hall, and beside the pool; the infinity edge is open.
+  const low = new THREE.Vector3(ATRIUM.cx, 0.6, ATRIUM.cz);
+  const toward = (a) => new THREE.Vector3(Math.cos(a), 0, -Math.sin(a));
+  assert.ok(near(space.surfaceHit(low, toward(0)), RAIL.r, 1e-4), 'balustrade round the hall');
+  assert.ok(near(space.surfaceHit(low, toward((BALCONY.a0 + POOL.a0) / 2)), BALCONY.r1 - 0.06, 1e-4), 'balustrade beside the pool');
+  assert.equal(space.surfaceHit(low, toward((POOL.a0 + POOL.a1) / 2)), Infinity, 'infinity edge');
 });
 
 test('orbit targets are kept off the walls', () => {

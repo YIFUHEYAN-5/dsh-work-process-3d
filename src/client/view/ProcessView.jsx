@@ -7,6 +7,7 @@ import { STATION_INFO, STATION_ORDER, MACHINE_INFO, basename } from '../../model
 import { priceFor, isPeak, affordableTokens } from '../../model/pricing.js';
 import { formatTokens, formatMoney, formatPct, formatDuration, fill } from '../format.js';
 import { createStreamMeter, withContext, fetchBalance } from '../live.js';
+import { acquireMusic, releaseMusic, DEFAULT_VOLUME } from '../music.js';
 import { CSS } from './styles.js';
 
 const { useEffect, useLayoutEffect, useRef, useState, useReducer, useCallback } = React;
@@ -25,7 +26,7 @@ const LOST_WAIT_MS = 5000;
 const QUALITY_KEY = 'dwp3d.quality';
 const HINT_KEY = 'dwp3d.hint';
 const LOOK_HINT_KEY = 'dwp3d.hint.look';
-const VIEWS = ['overview', 'fuel', 'engine', 'stations', 'dock', 'products', 'living', 'balcony'];
+const VIEWS = ['overview', 'fuel', 'engine', 'stations', 'dock', 'products', 'living', 'balcony', 'pool'];
 const LEGEND = ['raw', 'normal', 'gold', 'bad'];
 const PHASE_COLOR = { idle: '#8a93a6', thinking: '#a487ff', reasoning: '#a487ff', generating: '#6f8cff', tool: '#ffb347' };
 // Accent per HUD card; the same hues as the machines they describe (fuel cyan, engine violet…).
@@ -53,6 +54,10 @@ const FPS_KEY = 'dwp3d.fps';
 const PERF_KEY = 'dwp3d.perf';
 const LOOK_KEY = 'dwp3d.look';
 const BRIGHT_KEY = 'dwp3d.brightness';
+// Background music: on unless the user turned it off (then 'off' is stored), and its volume.
+const MUSIC_KEY = 'dwp3d.music';
+const MUSIC_VOL_KEY = 'dwp3d.musicVolume';
+const MUSIC_TICK_MS = 1000;
 
 function readStored(key) {
   try {
@@ -100,6 +105,16 @@ function storedBrightness() {
 
 function storedSource() {
   return readStored(SOURCE_KEY) === 'demo' ? 'demo' : 'live';
+}
+
+function storedMusicOn() {
+  return readStored(MUSIC_KEY) !== 'off';
+}
+
+function storedMusicVolume() {
+  const raw = readStored(MUSIC_VOL_KEY);
+  const v = raw == null ? NaN : Number(raw);
+  return Number.isFinite(v) && v >= 0 && v <= 1 ? v : DEFAULT_VOLUME;
 }
 
 /*
@@ -194,6 +209,7 @@ function presetFor(id) {
   if (id === 'robot' || id === 'lock' || id === 'unload' || id.startsWith('station:')) return 'stations';
   if (id === 'living') return 'living';
   if (id === 'dock') return 'dock';
+  if (id === 'pool') return 'pool';
   return 'products';
 }
 
@@ -237,6 +253,7 @@ function labelSpec(lang) {
     machine('loadport'),
     machine('stocker'),
     machine('living'),
+    machine('pool'),
   ];
 }
 
@@ -328,6 +345,7 @@ function tipFor(id, d) {
     case 'lock':
     case 'unload':
     case 'living':
+    case 'pool':
       return machine(id);
     case 'dock': {
       const agents = s.agents || [];
@@ -651,6 +669,33 @@ export function ProcessView(props) {
   const [lostLong, setLostLong] = useState(false);
   const displayBtnRef = useRef(null);
   const popRef = useRef(null);
+  const [musicOn, setMusicOn] = useState(storedMusicOn);
+  const [musicVol, setMusicVol] = useState(storedMusicVolume);
+  const [musicState, setMusicState] = useState('off');
+  const musicRef = useRef(null);
+
+  // Background music: one engine per page; this view holds it while mounted and reports when
+  // it is visible (through the scene's onActive).
+  useEffect(() => {
+    const music = acquireMusic();
+    musicRef.current = music;
+    setMusicState(music.state());
+    const off = music.subscribe(setMusicState);
+    return () => {
+      off();
+      musicRef.current = null;
+      releaseMusic(music, uid);
+    };
+  }, [uid]);
+  useEffect(() => {
+    if (musicRef.current) musicRef.current.setVolume(musicVol);
+  }, [musicVol]);
+  useEffect(() => {
+    if (musicRef.current) musicRef.current.setMood(look);
+  }, [look]);
+  useEffect(() => {
+    if (musicRef.current) musicRef.current.setEnabled(musicOn);
+  }, [musicOn]);
 
   // Data source. Live data comes from this plugin's Host projection; a DSH without the
   // projection hook (or one whose hook fails) can only show the demo.
@@ -755,6 +800,7 @@ export function ProcessView(props) {
     const key = last ? `${last.no}:${last.status}` : '';
     if (lastTurnRef.current && key !== lastTurnRef.current && last && last.status !== 'running') {
       queueBalance(BALANCE_AFTER_TURN_MS);
+      if (musicRef.current) musicRef.current.cue('turn');
     }
     lastTurnRef.current = key;
   }, [pushLiveState, queueBalance]);
@@ -862,6 +908,7 @@ export function ProcessView(props) {
           },
           onActive: (on) => {
             activeRef.current = on;
+            if (musicRef.current) musicRef.current.setActive(on, uid);
             if (on && dirtyRef.current) {
               dirtyRef.current = false;
               render();
@@ -910,6 +957,8 @@ export function ProcessView(props) {
       cancelAnimationFrame(raf2);
       if (scene) scene.dispose();
       sceneRef.current = null;
+      // A disposed scene reports nothing more; its successor reports again once it runs.
+      if (musicRef.current) musicRef.current.setActive(false, uid);
       clearTimeout(pendingRef.current);
       pendingRef.current = 0;
     };
@@ -932,6 +981,7 @@ export function ProcessView(props) {
           modelRef.current = reduceAll(modelRef.current, events);
           scene.setState(modelRef.current);
           schedule();
+          if (musicRef.current && events.some((e) => e && e.type === 'turn/end')) musicRef.current.cue('turn');
         },
         onLive: (live) => {
           if (!current()) return;
@@ -989,6 +1039,16 @@ export function ProcessView(props) {
     const id = setInterval(() => applyStream(meterRef.current.tick(nowMs())), STREAM_TICK_MS);
     return () => clearInterval(id);
   }, [demoOn, applyStream]);
+
+  // The music plays more glass notes while the session works.
+  useEffect(() => {
+    if (musicState !== 'playing') return undefined;
+    const id = setInterval(() => {
+      const scene = sceneRef.current;
+      if (scene && musicRef.current) musicRef.current.setActivity(scene.activity());
+    }, MUSIC_TICK_MS);
+    return () => clearInterval(id);
+  }, [musicState]);
 
   // Live data that does not arrive gets an explanation after a while.
   useEffect(() => {
@@ -1112,6 +1172,30 @@ export function ProcessView(props) {
     } catch {
       /* focus is best effort */
     }
+  };
+  // Browsers start audio only after a gesture, so any press inside the view unlocks the music.
+  const unlockMusic = () => {
+    if (musicRef.current) musicRef.current.unlock();
+  };
+  // `force` true/false picks that state; without it the button flips. A click on a pulsing
+  // button means "start the music", not "turn the switch off", so waiting counts as off.
+  const toggleMusic = (force) => {
+    const music = musicRef.current;
+    const waiting = !!music && music.state() === 'locked';
+    const next = force === true || (force !== false && (waiting || !musicOn));
+    setMusicOn(next);
+    writeStored(MUSIC_KEY, next ? null : 'off');
+    // Start inside the click itself: some browsers allow audio only during the gesture.
+    if (music) {
+      music.unlock();
+      music.setEnabled(next);
+    }
+  };
+  const onMusicVolume = (value) => {
+    const v = Math.min(1, Math.max(0, Number(value)));
+    if (!Number.isFinite(v)) return;
+    setMusicVol(v);
+    writeStored(MUSIC_VOL_KEY, Math.abs(v - DEFAULT_VOLUME) < 1e-3 ? null : String(v));
   };
   // Esc closes 显示 first, then leaves the screen close-up; every other key passes through.
   const onRootKeyDown = (e) => {
@@ -1321,9 +1405,25 @@ export function ProcessView(props) {
   const hud = !loading && !failed;
   const screenIds = screenId && sceneRef.current ? sceneRef.current.screens() : [];
   const autoLabel = manual ? t('quality.autoPlain') : t('quality.autoOpt', { q: t('quality.' + quality) });
+  const musicSupported = musicState !== 'unsupported';
+  // On, but the browser still waits for a click in the page before it plays sound.
+  const musicWaiting = musicOn && musicState === 'locked';
+  const musicTitle = !musicSupported
+    ? t('music.unsupported')
+    : musicWaiting
+      ? t('music.locked')
+      : t(musicOn ? 'music.onHint' : 'music.offHint');
+  const musicNote = !musicSupported ? t('music.unsupported') : musicWaiting ? t('music.locked') : null;
 
   return (
-    <div ref={rootRef} className={`dwp3d-root${failed ? ' fail' : ''}`} onKeyDown={onRootKeyDown}>
+    <div
+      ref={rootRef}
+      className={`dwp3d-root${failed ? ' fail' : ''}`}
+      onKeyDown={onRootKeyDown}
+      onKeyDownCapture={unlockMusic}
+      onPointerDownCapture={unlockMusic}
+      onPointerUpCapture={unlockMusic}
+    >
       <style>{CSS}</style>
       {!demoOn ? (
         <React.Fragment>
@@ -1450,6 +1550,19 @@ export function ProcessView(props) {
                 {t('ctl.panels')}
               </button>
               <button
+                type="button"
+                className={`dwp3d-btn${musicOn && musicSupported ? ' on' : ''}${musicWaiting ? ' wait' : ''}`}
+                title={musicTitle}
+                aria-pressed={musicOn && musicSupported}
+                aria-disabled={!musicSupported}
+                aria-describedby={musicNote ? `${uid}-music-note` : undefined}
+                onClick={() => {
+                  if (musicSupported) toggleMusic();
+                }}
+              >
+                {t('music.button')}
+              </button>
+              <button
                 ref={displayBtnRef}
                 type="button"
                 className={`dwp3d-btn${displayOpen ? ' on' : ''}`}
@@ -1465,6 +1578,11 @@ export function ProcessView(props) {
                 <button type="button" className="dwp3d-btn" onClick={toggleFullscreen}>
                   {fullscreen ? t('ctl.exitFullscreen') : t('ctl.fullscreen')}
                 </button>
+              ) : null}
+              {musicNote ? (
+                <p id={`${uid}-music-note`} className="dwp3d-music-note" role="status">
+                  {musicNote}
+                </p>
               ) : null}
             </div>
           </div>
@@ -1526,6 +1644,39 @@ export function ProcessView(props) {
                 >
                   ↺
                 </button>
+              </div>
+              <div className="dwp3d-pop-row">
+                <span className="dwp3d-pop-k">{t('music.label')}</span>
+                <div className="dwp3d-seg" role="group" aria-label={t('music.label')}>
+                  {[true, false].map((on) => (
+                    <button
+                      key={on ? 'on' : 'off'}
+                      type="button"
+                      className={`dwp3d-btn${musicOn === on ? ' on' : ''}`}
+                      aria-pressed={musicOn === on}
+                      disabled={!musicSupported}
+                      onClick={() => toggleMusic(on)}
+                    >
+                      {t(on ? 'music.on' : 'music.off')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="dwp3d-pop-row">
+                <label className="dwp3d-pop-k" htmlFor={`${uid}-volume`}>{t('music.volume')}</label>
+                <input
+                  id={`${uid}-volume`}
+                  className="dwp3d-range"
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={musicVol}
+                  disabled={!musicSupported}
+                  aria-valuetext={`${Math.round(musicVol * 100)}%`}
+                  onChange={(e) => onMusicVolume(e.target.value)}
+                />
+                <b className="dwp3d-pop-v">{`${Math.round(musicVol * 100)}%`}</b>
               </div>
               <div className="dwp3d-pop-row">
                 <label className="dwp3d-pop-k" htmlFor={`${uid}-quality`}>{t('ctl.quality')}</label>

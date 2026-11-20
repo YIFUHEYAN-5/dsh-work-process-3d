@@ -1,17 +1,17 @@
 import * as THREE from 'three';
-import { Kit, tf, box, cyl, rbox, torus, arcBand, wallStrip, pipeGeometry, clamp } from './util.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { Kit, tf, box, cyl, arcBand, wallStrip, pipeGeometry, clamp } from './util.js';
 import { fakeGlass } from './materials.js';
-import { ATRIUM, WELL, ISLANDS, MEDIA, ISLAND_THICKNESS, FACADE, BALCONY, TOWER, glslLayout, wellOutline, arcPoint } from './layout.js';
+import { ATRIUM, WELL, ISLANDS, MEDIA, ISLAND_THICKNESS, RAIL, BALCONY, POOL, TOWER, glslLayout, wellOutline, arcPoint } from './layout.js';
 import { NO_REFLECT_LAYER } from './reflection.js';
 
 /*
- * The hall: the round top floor of a skyscraper. Floor-to-ceiling curved glass panes on glass
- * fins (no columns, no gallery), a lit cove where the glass meets the ceiling, a ceiling with a
- * ring light around a skylight, and two open sliding doors onto a balcony on the sunset side.
- * Inside: a polished stone floor around a sunken "well", white floating islands that carry
- * the machines, a glowing data pool at the bottom of the well, a glass railing, and the curved
- * media wall at the back with a row of white compute modules under the screens.
- * Static parts are merged per material.
+ * The hall: the open roof deck of a skyscraper. No roof and no curtain wall: a frameless glass
+ * balustrade runs round the edge of the tower, and on the sunset side the floor runs on to a
+ * balcony with the sky pool (pool.js). Inside: a polished stone floor around a sunken "well",
+ * white floating islands that carry the machines, a glowing data pool at the bottom of the
+ * well, a glass railing, and the curved media wall at the back with a row of white compute
+ * modules under the screens. Static parts are merged per material.
  */
 
 const TAU = Math.PI * 2;
@@ -340,99 +340,85 @@ function islandBounds() {
   return { x0, x1, z0, z1 };
 }
 
-// ── Balcony ──────────────────────────────────────────────────────
+// ── Roof edge and balcony ────────────────────────────────────────
 
-/** A straight open cylinder from p0 to p1 (tension rods). */
-function rod(p0, p1, radius, seg = 6) {
-  const d = new THREE.Vector3().subVectors(p1, p0);
-  const len = d.length();
-  const g = new THREE.CylinderGeometry(radius, radius, len, seg, 1, true);
-  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.divideScalar(len)));
-  g.translate((p0.x + p1.x) / 2, (p0.y + p1.y) / 2, (p0.z + p1.z) / 2);
-  return g;
+/**
+ * The glass balustrade as one run round the whole roof edge: from the right end of the pool's
+ * infinity edge along the balcony's outer arc, in along its side, round the hall, out along
+ * the other side and back along the outer arc to the left end of the infinity edge.
+ */
+export function balustradePath() {
+  const { cx, cz } = ATRIUM;
+  const B = BALCONY;
+  const pt = (a, r) => [cx + r * Math.cos(a), cz - r * Math.sin(a)];
+  const pr = B.r1 - 0.06;
+  const path = [];
+  const arc = (a0, a1, r, first) => {
+    const n = Math.max(1, Math.ceil((Math.abs(a1 - a0) * r) / 0.45));
+    for (let k = first ? 0 : 1; k <= n; k++) path.push(pt(a0 + ((a1 - a0) * k) / n, r));
+  };
+  const side = (a, r0, r1) => {
+    const n = Math.max(1, Math.ceil(Math.abs(r1 - r0) / 0.45));
+    for (let k = 1; k <= n; k++) path.push(pt(a, r0 + ((r1 - r0) * k) / n));
+  };
+  arc(POOL.a1, B.a1, pr, true);
+  side(B.a1, pr, RAIL.r);
+  arc(B.a1, B.a0 + TAU, RAIL.r, false);
+  side(B.a0, RAIL.r, pr);
+  arc(B.a0, POOL.a0, pr, false);
+  return path;
 }
 
 /**
- * The balcony on the sunset side, outside the open doors: the stone floor runs out to a
- * frameless glass parapet with a chrome handrail; a cantilevered canopy with downlights hangs
- * from tension rods; two benches; the slab edge and the tower cornice below the floor line.
- * Static parts go into the kits; returns the floor mesh, which samples the floor reflection.
+ * The roof edge: the stone floor runs on from the hall onto the balcony round the sky pool
+ * (pool.js builds the basin, the water and the deck furniture); a frameless glass balustrade
+ * with a chrome handrail runs round the whole edge except along the infinity edge. Below the
+ * floor line: the tower cornice with a light line and the balcony slab edge.
+ * Static parts go into the kits; returns the balcony floor, which samples the floor reflection.
  */
-function buildBalcony({ kit, low, glassKit, floorMat, at }) {
+function buildRoofEdge({ kit, low, glassKit, floorMat, at }) {
   const { cx, cz, r: R } = ATRIUM;
   const B = BALCONY;
   const span = B.a1 - B.a0;
-  const pt = (a, r) => [cx + r * Math.cos(a), cz - r * Math.sin(a)];
+  const ring = (r0, r1, s0, s1, seg) => tf(new THREE.RingGeometry(r0, r1, seg, 1, s0, s1 - s0), [0, 0, 0], [-Math.PI / 2, 0, 0]);
 
-  const floor = new THREE.Mesh(tf(new THREE.RingGeometry(R + 0.2, B.r1, 96, 3, B.a0, span), [0, 0, 0], [-Math.PI / 2, 0, 0]), floorMat);
+  // Balcony floor: a band along the hall, and the sun decks either side of the pool.
+  const floor = new THREE.Mesh(
+    mergeGeometries([ring(R + 0.2, POOL.r0, B.a0, B.a1, 96), ring(POOL.r0, B.r1, B.a0, POOL.a0, 24), ring(POOL.r0, B.r1, POOL.a1, B.a1, 24)]),
+    floorMat,
+  );
   floor.name = 'balcony-floor';
   floor.position.set(cx, 0, cz);
   floor.receiveShadow = true;
   floor.layers.set(NO_REFLECT_LAYER);
 
-  // A narrow ledge outside the glass along the rest of the tower top.
+  // A narrow ledge outside the balustrade along the rest of the tower top.
   kit.add('white', tf(new THREE.RingGeometry(R + 0.2, TOWER.r, 160, 1, B.a1, TAU - span), [cx, 0, cz], [-Math.PI / 2, 0, 0]));
 
-  // Below the floor line: the tower cornice with a light line, and the balcony slab edge.
+  // Below the floor line: the tower cornice with a light line, and the balcony slab edge. Along
+  // the pool the slab edge is the outer wall of the catch trough, which stops below the water.
   low.add('white', arcBand(cx, cz, TOWER.r, B.a1, B.a0 + TAU, -0.45, 0, 160, false));
   low.add('glowCyan', arcBand(cx, cz, TOWER.r + 0.004, B.a1, B.a0 + TAU, -0.24, -0.21, 160, false));
-  low.add('white', arcBand(cx, cz, B.r1, B.a0, B.a1, -B.slab, 0, 72, false));
-  low.add('silver', arcBand(cx, cz, B.r1 + 0.004, B.a0, B.a1, -0.04, 0, 72, false));
+  for (const [s0, s1] of [[B.a0, POOL.a0], [POOL.a1, B.a1]]) {
+    low.add('white', arcBand(cx, cz, B.r1, s0, s1, -B.slab, 0, 24, false));
+    low.add('silver', arcBand(cx, cz, B.r1 + 0.004, s0, s1, -0.04, 0, 24, false));
+  }
+  low.add('white', arcBand(cx, cz, B.r1, POOL.a0, POOL.a1, -B.slab, -0.32, 48, false));
   low.add('glowCyan', arcBand(cx, cz, B.r1 + 0.006, B.a0, B.a1, -B.slab + 0.03, -B.slab + 0.06, 72, false));
   for (const a of [B.a0, B.a1]) low.add('white', tf(box(B.r1 - TOWER.r, B.slab, 0.04), at(a, (TOWER.r + B.r1) / 2, -B.slab / 2), [0, a, 0]));
 
-  // Frameless glass parapet: side runs from the facade out to the edge, then the arc.
-  const pr = B.r1 - 0.06;
-  const pin = R + 0.05;
-  const path = [];
-  for (let k = 0; k <= 4; k++) path.push(pt(B.a0, pin + ((pr - pin) * k) / 4));
-  const steps = Math.ceil((span * pr) / 0.45);
-  for (let k = 1; k <= steps; k++) path.push(pt(B.a0 + (span * k) / steps, pr));
-  for (let k = 3; k >= 0; k--) path.push(pt(B.a1, pin + ((pr - pin) * k) / 4));
-  const centre = pt((B.a0 + B.a1) / 2, (R + B.r1) / 2);
+  // Frameless glass balustrade with a chrome handrail, a silver shoe outside, a light line inside.
+  const path = balustradePath();
+  const centre = [cx + ((R + B.r1) / 2) * Math.cos((B.a0 + B.a1) / 2), cz - ((R + B.r1) / 2) * Math.sin((B.a0 + B.a1) / 2)];
   const inward = (mx, mz, nx, nz) => (centre[0] - mx) * nx + (centre[1] - mz) * nz > 0;
   const outward = (mx, mz, nx, nz) => !inward(mx, mz, nx, nz);
-  glassKit.add('rail', wallStrip(path, 0.045, B.rail));
-  kit.add('chrome', pipeGeometry(path.map(([x, z]) => [x, B.rail + 0.026, z]), 0.026, 0.1, 8));
+  glassKit.add('rail', wallStrip(path, 0.045, RAIL.h));
+  kit.add('chrome', pipeGeometry(path.map(([x, z]) => [x, RAIL.h + 0.026, z]), 0.026, 0.1, 8));
   kit.add('silver', wallStrip(path, 0, 0.045, { facing: outward }));
   kit.add('glowCyan', wallStrip(path, 0, 0.04, { facing: inward }));
-  for (let i = 0; i < path.length; i += 5) kit.add('chrome', tf(cyl(0.018, 0.018, B.rail, 8), [path[i][0], B.rail / 2, path[i][1]]));
-
-  // Cantilevered canopy: white top, lit soffit with downlights and a light line near the edge,
-  // silver edge, hung from the facade on tension rods.
-  const cy = B.canopyY;
-  const cIn = R + 0.02;
-  const cOut = B.r1 + 0.35;
-  kit.add('white', tf(new THREE.RingGeometry(cIn, cOut, 96, 1, B.a0, span), [cx, cy + 0.14, cz], [-Math.PI / 2, 0, 0]));
-  kit.add('ceiling', tf(new THREE.RingGeometry(cIn, cOut, 96, 1, -B.a1, span), [cx, cy, cz], [Math.PI / 2, 0, 0]));
-  kit.add('glowCyan', tf(new THREE.RingGeometry(cOut - 0.13, cOut - 0.09, 96, 1, -B.a1, span), [cx, cy - 0.003, cz], [Math.PI / 2, 0, 0]));
-  kit.add('silver', arcBand(cx, cz, cOut, B.a0, B.a1, cy, cy + 0.14, 72, false));
-  kit.add('silver', arcBand(cx, cz, cOut - 0.002, B.a0, B.a1, cy, cy + 0.14, 72, true));
-  for (const a of [B.a0, B.a1]) kit.add('silver', tf(box(cOut - cIn, 0.14, 0.04), at(a, (cIn + cOut) / 2, cy + 0.07), [0, a, 0]));
-  for (const [rr, n] of [[23.3, 17], [25.2, 19]]) {
-    for (let k = 0; k < n; k++) {
-      const a = B.a0 + ((k + 0.5) * span) / n;
-      kit.add('glowWhite', tf(new THREE.CircleGeometry(0.085, 16), at(a, rr, cy - 0.003), [Math.PI / 2, 0, 0]));
-      kit.add('chrome', tf(new THREE.RingGeometry(0.085, 0.11, 16, 1), at(a, rr, cy - 0.002), [Math.PI / 2, 0, 0]));
-    }
-  }
-  const rp0 = new THREE.Vector3();
-  const rp1 = new THREE.Vector3();
-  for (let k = 0; k < 6; k++) {
-    const a = B.a0 + ((k + 0.5) * span) / 6;
-    arcPoint(a, cOut - 0.15, cy + 0.14, rp0);
-    arcPoint(a, R + 0.03, cy + 3.4, rp1);
-    kit.add('silver', rod(rp0, rp1, 0.014));
-    kit.add('chrome', tf(cyl(0.05, 0.05, 0.03, 14), rp1.toArray(), [0, a, Math.PI / 2]));
-  }
-
-  // Two benches facing the sunset, floating on a dark plinth with a light gap.
-  for (const deg of [250, 290]) {
-    const a = (deg * Math.PI) / 180;
-    kit.add('white', tf(rbox(0.5, 0.34, 2.4, 0.05, 3), at(a, 23.4, 0.27), [0, a, 0]));
-    kit.add('dark', tf(box(0.32, 0.1, 2.1), at(a, 23.4, 0.05), [0, a, 0]));
-    kit.add('glowCyan', tf(box(0.33, 0.012, 2.11), at(a, 23.4, 0.094), [0, a, 0]));
-  }
+  for (let i = 0; i < path.length; i += 5) kit.add('chrome', tf(cyl(0.018, 0.018, RAIL.h, 8), [path[i][0], RAIL.h / 2, path[i][1]]));
+  const last = path[path.length - 1];
+  kit.add('chrome', tf(cyl(0.024, 0.024, RAIL.h, 10), [last[0], RAIL.h / 2, last[1]]));
   return { floor };
 }
 
@@ -445,19 +431,11 @@ function buildBalcony({ kit, low, glassKit, floorMat, at }) {
 export function buildAtrium(M, { reflection = null } = {}) {
   const root = new THREE.Group();
   root.name = 'atrium';
-  const { cx, cz, r: R, h: H } = ATRIUM;
+  const { cx, cz, r: R } = ATRIUM;
 
   const mats = {
     white: new THREE.MeshStandardMaterial({ color: 0xf3f5f8, metalness: 0, roughness: 0.34, name: 'atrium-white' }),
     satin: new THREE.MeshStandardMaterial({ color: 0xe1e5eb, metalness: 0, roughness: 0.55, name: 'atrium-satin' }),
-    ceiling: new THREE.MeshStandardMaterial({
-      color: 0xf4f6f9,
-      metalness: 0,
-      roughness: 0.85,
-      emissive: 0xe6edf6,
-      emissiveIntensity: 0.22,
-      name: 'atrium-ceiling',
-    }),
     silver: new THREE.MeshStandardMaterial({ color: 0xc9ced6, metalness: 1, roughness: 0.28, name: 'atrium-silver' }),
     chrome: M.chrome,
     dark: new THREE.MeshStandardMaterial({ color: 0x0a101c, metalness: 0.6, roughness: 0.2, name: 'atrium-dark' }),
@@ -466,121 +444,18 @@ export function buildAtrium(M, { reflection = null } = {}) {
     glowWhite: glow(0xfff6ea, 3.2, 'atrium-glow-white'),
   };
   const glows = [mats.glowCyan, mats.glowBlue, mats.glowWhite];
-  const ringMat = glow(0xffffff, 5.0, 'atrium-ring-light');
-  // Seen from the hall and from the balcony, so both faces are drawn.
-  const curtainGlass = fakeGlass({ color: 0xcfe0f2, opacity: 0.045, fresnel: 0.5, side: THREE.DoubleSide });
-  const finGlass = fakeGlass({ color: 0xd6e6f6, opacity: 0.1, fresnel: 0.6, side: THREE.DoubleSide });
+  // Seen from the hall and from outside, so both faces are drawn.
   const railGlass = fakeGlass({ color: 0xd8e6f5, opacity: 0.08, fresnel: 0.5, side: THREE.DoubleSide });
-  const skyGlass = fakeGlass({ color: 0xcfe0f2, opacity: 0.04, fresnel: 0.4 });
 
   const kit = new Kit(); // above the floor plane, reflected
   const low = new Kit(); // below the floor plane, never reflected
-
-  const glassKit = new Kit(); // facade panes, fins, door leaves and the balcony parapet
+  const glassKit = new Kit(); // the balustrade glass
   const tmpP = new THREE.Vector3();
   const at = (a, r, y) => arcPoint(a, r, y, tmpP).toArray();
 
-  // Facade: floor-to-ceiling curved panes on glass fins. No columns, no gallery: the city is
-  // the view. Two panes are cut at the doorway, which leaves only the glass above the header.
-  const { doorA0, doorA1, doorH } = FACADE;
-  const doorTop = doorH + 0.12;
-  const paneSpan = TAU / FACADE.panes;
-  const joint = 0.006 / R;
-  const inDoor = (a) => a > doorA0 + 1e-6 && a < doorA1 - 1e-6;
-  for (let i = 0; i < FACADE.panes; i++) {
-    const p0 = i * paneSpan + joint;
-    const p1 = (i + 1) * paneSpan - joint;
-    const cuts = [p0];
-    for (const d of [doorA0, doorA1]) if (d > p0 && d < p1) cuts.push(d);
-    cuts.push(p1);
-    for (let k = 0; k + 1 < cuts.length; k++) {
-      const s0 = cuts[k];
-      const s1 = cuts[k + 1];
-      const y0 = inDoor((s0 + s1) / 2) ? doorTop : 0.05;
-      const segs = Math.max(2, Math.ceil(((s1 - s0) / paneSpan) * 16));
-      glassKit.add('glass', arcBand(cx, cz, R, s0, s1, y0, H, segs, true));
-    }
-  }
-
-  // Glass fins at the joints, with silver shoes, caps and small patch fittings that clamp fin
-  // and glass together.
-  const finD = FACADE.finDepth;
-  const finH = H - 0.55;
-  const finR = R - finD / 2 - 0.004;
-  for (let i = 0; i < FACADE.panes; i++) {
-    const a = i * paneSpan;
-    if (inDoor(a)) continue;
-    glassKit.add('fin', tf(box(finD, finH, 0.022), at(a, finR, finH / 2), [0, a, 0]));
-    kit.add('silver', tf(box(finD + 0.04, 0.06, 0.05), at(a, finR, 0.03), [0, a, 0]));
-    kit.add('silver', tf(box(finD + 0.04, 0.06, 0.05), at(a, finR, finH - 0.03), [0, a, 0]));
-    for (const y of [1.1, 4.7, 8.3, 11.9]) {
-      kit.add('chrome', tf(box(0.025, 0.09, 0.17), at(a, R - 0.0175, y), [0, a, 0]));
-      kit.add('chrome', tf(box(0.09, 0.09, 0.045), at(a, R - 0.075, y), [0, a, 0]));
-      for (const side of [-1, 1]) {
-        kit.add('chrome', tf(cyl(0.022, 0.022, 0.018, 14), at(a + side * (0.055 / R), R - 0.039, y), [0, a, Math.PI / 2]));
-      }
-    }
-  }
-
-  // Lit cove where the glass meets the ceiling.
-  const coveY = H - 0.55;
-  kit.add('white', arcBand(cx, cz, R - 0.6, 0, TAU, coveY, H, 160, true));
-  kit.add('satin', tf(new THREE.RingGeometry(R - 0.6, R - 0.01, 160, 1), [cx, coveY, cz], [Math.PI / 2, 0, 0]));
-  kit.add('glowWhite', tf(new THREE.RingGeometry(R - 0.16, R - 0.1, 160, 1), [cx, coveY - 0.004, cz], [Math.PI / 2, 0, 0]));
-  kit.add('glowCyan', arcBand(cx, cz, R - 0.605, 0, TAU, coveY + 0.02, coveY + 0.05, 160, true));
-
-  // A light line along the glass base and a low silver sill, both open at the doorway.
-  const wallA0 = doorA1;
-  const wallLen = TAU - (doorA1 - doorA0);
-  kit.add('glowCyan', tf(new THREE.RingGeometry(R - 0.17, R - 0.13, 160, 1, wallA0, wallLen), [cx, 0.003, cz], [-Math.PI / 2, 0, 0]));
-  kit.add('silver', arcBand(cx, cz, R - 0.03, wallA0, wallA0 + wallLen, 0, 0.05, 160, true));
-
-  // The doorway: slim posts, a header with a light line, a threshold, and two glass leaves
-  // slid open along a track inside the glass.
-  for (const a of [doorA0, doorA1]) kit.add('silver', tf(box(0.14, doorTop, 0.06), at(a, R - 0.03, doorTop / 2), [0, a, 0]));
-  const doorSpan = doorA1 - doorA0;
-  kit.add('silver', arcBand(cx, cz, R - 0.06, doorA0, doorA1, doorH, doorTop, 16, true));
-  kit.add('silver', arcBand(cx, cz, R + 0.04, doorA0, doorA1, doorH, doorTop, 16, false));
-  kit.add('silver', tf(new THREE.RingGeometry(R - 0.06, R + 0.04, 16, 1, -doorA1, doorSpan), [cx, doorH, cz], [Math.PI / 2, 0, 0]));
-  kit.add('glowWhite', tf(new THREE.RingGeometry(R - 0.025, R + 0.005, 16, 1, -doorA1, doorSpan), [cx, doorH - 0.002, cz], [Math.PI / 2, 0, 0]));
-  kit.add('silver', tf(new THREE.RingGeometry(R - 0.22, R + 0.24, 16, 1, doorA0, doorSpan), [cx, 0.003, cz], [-Math.PI / 2, 0, 0]));
-  const leafW = doorSpan / 2;
-  const leafR = R - 0.09;
-  for (const [l0, l1, lead] of [[doorA0 - leafW, doorA0, 0.9], [doorA1, doorA1 + leafW, 0.1]]) {
-    glassKit.add('fin', arcBand(cx, cz, leafR, l0 + 0.03 / leafR, l1 - 0.03 / leafR, 0.06, doorH - 0.06, 12, true));
-    kit.add('silver', arcBand(cx, cz, leafR - 0.02, l0, l1, 0, 0.06, 12, true));
-    kit.add('silver', arcBand(cx, cz, leafR - 0.02, l0, l1, doorH - 0.06, doorH, 12, true));
-    for (const a of [l0, l1]) kit.add('silver', tf(box(0.05, doorH, 0.05), at(a, leafR, doorH / 2), [0, a, 0]));
-    kit.add('chrome', tf(cyl(0.012, 0.012, 1.1, 8), at(l0 + (l1 - l0) * lead, leafR - 0.05, 1.05)));
-  }
-  kit.add('silver', arcBand(cx, cz, leafR - 0.035, doorA0 - leafW, doorA1 + leafW, doorH, doorH + 0.08, 24, true));
-
-  // Ceiling: coffered ring around the skylight with a ring light.
-  kit.add('ceiling', tf(new THREE.RingGeometry(6.4, R, 160, 2), [cx, H, cz], [Math.PI / 2, 0, 0]));
-  for (let i = 0; i < 16; i++) {
-    const a = (i / 16) * TAU;
-    const mr = (R + 6.4) / 2;
-    kit.add('white', tf(box(R - 6.4, 0.34, 0.3), [cx + mr * Math.cos(a), H - 0.17, cz - mr * Math.sin(a)], [0, a, 0]));
-  }
-  for (const rr of [9.0, 16.5]) {
-    kit.add('white', arcBand(cx, cz, rr, 0, TAU, H - 0.34, H, 160, true));
-    kit.add('white', arcBand(cx, cz, rr + 0.3, 0, TAU, H - 0.34, H, 160, false));
-    kit.add('white', tf(new THREE.RingGeometry(rr, rr + 0.3, 160, 1), [cx, H - 0.34, cz], [Math.PI / 2, 0, 0]));
-  }
-  for (const rr of [11.15, 11.85]) {
-    kit.add('satin', arcBand(cx, cz, rr, 0, TAU, H - 0.24, H, 160, true));
-    kit.add('satin', arcBand(cx, cz, rr, 0, TAU, H - 0.24, H, 160, false));
-  }
-  const ringLight = new THREE.Mesh(tf(torus(11.5, 0.12, 10, 240), [0, 0, 0], [Math.PI / 2, 0, 0]), ringMat);
-  ringLight.name = 'ring-light';
-  ringLight.position.set(cx, H - 0.15, cz);
-  root.add(ringLight);
-  kit.add('chrome', tf(torus(6.4, 0.1, 10, 160), [cx, H, cz], [Math.PI / 2, 0, 0]));
-  for (let i = 0; i < 4; i++) kit.add('silver', tf(box(12.8, 0.12, 0.12), [cx, H + 0.03, cz], [0, (i * Math.PI) / 4, 0]));
-  const skylight = new THREE.Mesh(tf(new THREE.CircleGeometry(6.4, 96), [0, 0, 0], [Math.PI / 2, 0, 0]), skyGlass);
-  skylight.name = 'skylight';
-  skylight.position.set(cx, H + 0.06, cz);
-  root.add(skylight);
+  // A light line on the floor along the balustrade, open across the balcony.
+  const span = BALCONY.a1 - BALCONY.a0;
+  kit.add('glowCyan', tf(new THREE.RingGeometry(R - 0.19, R - 0.15, 160, 1, BALCONY.a1, TAU - span), [cx, 0.003, cz], [-Math.PI / 2, 0, 0]));
 
   // Media wall: dark glass band for the screens, white fascia, back face, caps and light lines.
   const { a0, a1 } = MEDIA;
@@ -649,7 +524,7 @@ export function buildAtrium(M, { reflection = null } = {}) {
   floor.position.set(cx, 0, cz);
   floor.receiveShadow = true;
   floor.layers.set(NO_REFLECT_LAYER);
-  const balcony = buildBalcony({ kit, low, glassKit, floorMat, at });
+  const balcony = buildRoofEdge({ kit, low, glassKit, floorMat, at });
   root.add(balcony.floor);
   const bounds = islandBounds();
   const tops = new THREE.Mesh(
@@ -706,10 +581,7 @@ export function buildAtrium(M, { reflection = null } = {}) {
     root.add(railing);
   }
 
-  const glassGroup = glassKit.build(
-    { glass: curtainGlass, fin: finGlass, rail: railGlass },
-    { castShadow: false, receiveShadow: false, name: 'facade-glass' },
-  );
+  const glassGroup = glassKit.build({ rail: railGlass }, { castShadow: false, receiveShadow: false, name: 'balustrade-glass' });
   glassGroup.traverse((m) => {
     if (m.isMesh) m.renderOrder = 2;
   });
@@ -736,8 +608,6 @@ export function buildAtrium(M, { reflection = null } = {}) {
     setLook(look) {
       const k = look.glow == null ? 1 : look.glow;
       for (const m of glows) m.color.setHex(m.userData.glow.hex).multiplyScalar(m.userData.glow.k * k);
-      ringMat.color.set(look.interior.ring).multiplyScalar(look.interior.ringPower);
-      mats.ceiling.emissiveIntensity = look.id === 'day' ? 0.16 : 0.22;
       poolMat.uniforms.uGlow.value = k;
     },
   };

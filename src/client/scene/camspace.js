@@ -1,5 +1,9 @@
 import * as THREE from 'three';
-import { ATRIUM, MEDIA, WELL, CAMERA_LIMIT, cameraRegion, clampCameraPoint, sdIslands, sdWell } from './layout.js';
+import {
+  ATRIUM, MEDIA, WELL, BALCONY, POOL, RAIL, TOWER,
+  cameraRegion, clampCameraPoint, inBalconySector, overPool, sdIslands, sdWell,
+} from './layout.js';
+import { POOL_LEVELS } from './pool.js';
 
 /*
  * Where the camera may be.
@@ -12,7 +16,8 @@ import { ATRIUM, MEDIA, WELL, CAMERA_LIMIT, cameraRegion, clampCameraPoint, sdIs
  * does not make the view jump back and forth.
  *
  * The orbit camera keeps its own wanted position; the rendered view is pulled in along the
- * line to the target when the glass or a wall is in the way (a third-person "spring arm") and
+ * line to the target when it would leave the walkable space (past the balustrade, below the
+ * floor or above the height limit) or a wall is in the way (a third-person "spring arm") and
  * eases back out once the way is clear. The roaming camera slides along solids instead of
  * stopping dead.
  */
@@ -25,6 +30,8 @@ const CAP_A = 0.16 / MEDIA.screenR;
 const WALL_TOP = MEDIA.top + 0.05;
 const BACK = MEDIA.back + 0.05;
 const MARCH = 0.1;
+const EXIT_STEP = 0.25;
+const EXIT_MAX = 80;
 
 function sector(id, r0, r1, a0, a1, y0, y1) {
   return { kind: 'sector', block: 'ray', id, r0, r1, a0, a1, y0, y1 };
@@ -248,14 +255,31 @@ export function createCameraSpace(objects = []) {
     return v;
   }
 
-  /** How far the ray can go before it leaves the hall (glass radius, floor and ceiling heights). */
-  function containerExit(origin, dir) {
-    let t = Infinity;
-    cylinderRoots(origin, dir, CAMERA_LIMIT.r, roots);
-    for (const x of roots) t = Math.min(t, x);
-    if (dir.y > 1e-9) t = Math.min(t, (CAMERA_LIMIT.yMax - origin.y) / dir.y);
-    else if (dir.y < -1e-9) t = Math.min(t, (CAMERA_LIMIT.yMin - origin.y) / dir.y);
-    return Math.max(0, t);
+  /**
+   * How far the ray can go before it leaves the walkable space (the hall disc and the balcony
+   * sector between the floor and the height limit). The space is not convex, so the ray is
+   * marched and the exit refined by bisection. 0 when the origin is already outside.
+   */
+  function containerExit(origin, dir, maxT = EXIT_MAX) {
+    if (!cameraRegion(origin)) return 0;
+    let inside = 0;
+    for (let s = EXIT_STEP; inside < maxT; s += EXIT_STEP) {
+      const ss = Math.min(s, maxT);
+      _p.copy(origin).addScaledVector(dir, ss);
+      if (!cameraRegion(_p)) {
+        let lo = inside;
+        let hi = ss;
+        for (let k = 0; k < 8; k++) {
+          const mid = (lo + hi) / 2;
+          _p.copy(origin).addScaledVector(dir, mid);
+          if (cameraRegion(_p)) lo = mid;
+          else hi = mid;
+        }
+        return lo;
+      }
+      inside = ss;
+    }
+    return maxT;
   }
 
   /**
@@ -303,34 +327,51 @@ export function createCameraSpace(objects = []) {
   }
 
   /**
-   * Nearest architectural surface along a ray (floor or data pool, ceiling, glass, media wall
-   * front or back), for zooming towards whatever is under the pointer. Returns the distance or
-   * Infinity. Machines are picked separately through their hover proxies.
+   * Nearest architectural surface along a ray (deck floor, data pool, sky pool water, the glass
+   * balustrade, media wall front or back), for zooming towards whatever is under the pointer.
+   * The roof is open: a ray into the sky or past the tower edge hits nothing. Returns the
+   * distance or Infinity. Machines are picked separately through their hover proxies.
    */
   function surfaceHit(origin, dir, maxT = 200) {
     let best = maxT;
     if (dir.y < -1e-6) {
-      let t = -origin.y / dir.y;
+      const t = -origin.y / dir.y;
       if (t > 0 && t < best) {
         _p.copy(origin).addScaledVector(dir, t);
-        const overPool = sdWell(_p.x, _p.z) < 0 && sdIslands(_p.x, _p.z) > 0;
-        if (overPool) t = (-WELL.depth - origin.y) / dir.y;
-        if (t > 0 && t < best) best = t;
+        const r = Math.hypot(_p.x - ATRIUM.cx, _p.z - ATRIUM.cz);
+        const a = angleOf(_p.x - ATRIUM.cx, _p.z - ATRIUM.cz);
+        let level = null;
+        if (r <= TOWER.r) level = sdWell(_p.x, _p.z) < 0 && sdIslands(_p.x, _p.z) > 0 ? -WELL.depth : 0;
+        else if (r <= BALCONY.r1 && inBalconySector(a)) {
+          // Past the knife edge the catch trough holds water 0.42 m below the basin.
+          level = overPool(_p.x, _p.z) ? (r > POOL.r1 ? POOL_LEVELS.troughWater : POOL.water) : 0;
+        }
+        if (level !== null) {
+          const tl = (level - origin.y) / dir.y;
+          if (tl > 0 && tl < best) best = tl;
+        }
       }
     }
-    if (dir.y > 1e-6) {
-      const t = (ATRIUM.h - origin.y) / dir.y;
-      if (t > 0 && t < best) best = t;
-    }
-    for (const r of [ATRIUM.r, MEDIA.screenR, MEDIA.back]) {
+    // The balustrade: around the hall outside the balcony, and along the balcony's outer arc
+    // beside the pool (the infinity edge itself is open).
+    for (const r of [RAIL.r, BALCONY.r1 - 0.06]) {
       cylinderRoots(origin, dir, r, roots);
       for (const t of roots) {
         if (t >= best) continue;
         _p.copy(origin).addScaledVector(dir, t);
-        if (r !== ATRIUM.r) {
-          const a = angleOf(_p.x - ATRIUM.cx, _p.z - ATRIUM.cz);
-          if (a < MEDIA.a0 || a > MEDIA.a1 || _p.y < 0 || _p.y > MEDIA.top) continue;
-        } else if (_p.y < 0 || _p.y > ATRIUM.h) continue;
+        if (_p.y < 0 || _p.y > RAIL.h) continue;
+        const a = angleOf(_p.x - ATRIUM.cx, _p.z - ATRIUM.cz);
+        const onRail = r === RAIL.r ? !inBalconySector(a) : inBalconySector(a) && (a < POOL.a0 || a > POOL.a1);
+        if (onRail) best = t;
+      }
+    }
+    for (const r of [MEDIA.screenR, MEDIA.back]) {
+      cylinderRoots(origin, dir, r, roots);
+      for (const t of roots) {
+        if (t >= best) continue;
+        _p.copy(origin).addScaledVector(dir, t);
+        const a = angleOf(_p.x - ATRIUM.cx, _p.z - ATRIUM.cz);
+        if (a < MEDIA.a0 || a > MEDIA.a1 || _p.y < 0 || _p.y > MEDIA.top) continue;
         best = t;
       }
     }

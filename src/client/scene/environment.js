@@ -3,11 +3,13 @@ import { mesh } from './util.js';
 import { createSky } from './sky.js';
 import { buildAtrium } from './atrium.js';
 import { buildCity } from './city.js';
+import { buildPool } from './pool.js';
 import { NO_REFLECT_LAYER } from './reflection.js';
 
 /*
- * Stage = everything that is not a machine: sky and environment lighting, the glass atrium with
- * its floors and media wall, the city outside, and the sun / sky / fill lights of the current look.
+ * Stage = everything that is not a machine: the open sky and environment lighting, the roof deck
+ * with its floors, balustrade and media wall, the sky pool on the balcony, the city below, and
+ * the key (sun or moon) / sky / fill lights of the current look.
  */
 
 /** Clear colour behind the sky dome (only visible for a frame while the scene builds). */
@@ -95,7 +97,8 @@ export function blobShadow(M, w, d, p, opacity = 0.55) {
 
 /**
  * buildStage(M, tex, quality, { renderer, look, reflection, beamTarget }) → { root, key, sky,
- * reflectors, bounds, envTexture, update(dt, t, info), setLook(look) }.
+ * pool, reflectors, bounds, envTexture, update(dt, t, info), setLook(look),
+ * setReducedMotion(on) }.
  */
 export function buildStage(M, tex, quality, { renderer = null, look, reflection = null, beamTarget } = {}) {
   const root = new THREE.Group();
@@ -105,6 +108,8 @@ export function buildStage(M, tex, quality, { renderer = null, look, reflection 
   root.add(sky.dome);
   const atrium = buildAtrium(M, { reflection });
   root.add(atrium.root);
+  const pool = buildPool(M, { reflection, skyTexture: sky.texture });
+  root.add(pool.root);
   const city = buildCity({ quality, beamTarget });
   root.add(city.root);
 
@@ -135,6 +140,7 @@ export function buildStage(M, tex, quality, { renderer = null, look, reflection 
     fill.updateMatrixWorld();
     fill.target.updateMatrixWorld();
     atrium.setLook(next);
+    pool.setLook(next);
     city.setLook(next);
   }
   setLook(look);
@@ -143,18 +149,26 @@ export function buildStage(M, tex, quality, { renderer = null, look, reflection 
     root,
     key,
     sky,
+    pool,
     reflectors: atrium.reflectors,
     bounds: atrium.bounds,
     get envTexture() {
       return sky.envTexture;
     },
     update(dt, t, info) {
+      sky.update(dt, t);
       atrium.update(dt, t, info);
+      pool.update(dt, t);
       city.update(dt, t, info);
     },
     setLook,
+    /** Twinkling and shooting stars stop when the system asks for reduced motion. */
+    setReducedMotion(on) {
+      sky.setReducedMotion(on);
+    },
     dispose() {
       sky.dispose();
+      pool.dispose();
     },
   };
 }

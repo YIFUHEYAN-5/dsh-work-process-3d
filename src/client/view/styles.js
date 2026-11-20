@@ -32,6 +32,7 @@ export const CSS = `
 .dwp3d-note .dwp3d-link{margin-left:6px}
 .dwp3d-dot{width:7px;height:7px;border-radius:50%;background:currentColor;box-shadow:0 0 6px currentColor;flex:none}
 .dwp3d-tools{display:flex;align-items:center;gap:6px;padding:4px;flex-wrap:wrap;justify-content:flex-end}
+.dwp3d-music-note{flex:0 0 100%;margin:0;text-align:right;color:#a8b3c8;font-size:11px;line-height:1.45}
 .dwp3d-right{display:flex;flex-direction:column;align-items:flex-end;gap:8px;max-width:100%}
 .dwp3d-perf{display:grid;grid-template-columns:auto auto;gap:3px 14px;padding:8px 11px;font-size:11.5px;color:#aab4c8;font-variant-numeric:tabular-nums;min-width:200px}
 .dwp3d-perf-row{display:contents}
@@ -42,6 +43,7 @@ export const CSS = `
 .dwp3d-btn:hover{background:rgba(255,255,255,.09);color:#fff}
 .dwp3d-btn.on{background:#4d6bfe;color:#fff}
 .dwp3d-btn:disabled{opacity:.4;cursor:default;background:transparent}
+.dwp3d-btn[aria-disabled="true"]{opacity:.4;cursor:default;background:transparent}
 .dwp3d-btn:focus-visible,.dwp3d-select:focus-visible,.dwp3d-x:focus-visible{outline:2px solid #8ea2ff;outline-offset:1px}
 .dwp3d-select{appearance:none;-webkit-appearance:none;border:0;font:inherit;font-size:12px;height:26px;padding:0 22px 0 9px;border-radius:6px;color:#c9d2e3;cursor:pointer;background:rgba(255,255,255,.05) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23c9d2e3' stroke-width='1.4'/%3E%3C/svg%3E") no-repeat right 7px center}
 .dwp3d-select option{background:#16191f;color:#e6e9ef}
@@ -80,6 +82,9 @@ export const CSS = `
 .dwp3d-range:focus-visible,.dwp3d-check input:focus-visible{outline:2px solid #8ea2ff;outline-offset:2px}
 .dwp3d-check{gap:8px;cursor:pointer;color:#c9d2e3}
 .dwp3d-check input{margin:0;accent-color:#4d6bfe;cursor:pointer}
+.dwp3d-range:disabled{opacity:.45;cursor:default}
+.dwp3d-pop-note{margin:-2px 0 0;max-width:280px;color:#a8b3c8;font-size:11px;line-height:1.45}
+.dwp3d-btn.wait{background:rgba(77,107,254,.32);animation:dwp3d-label-pulse 1.6s ease-in-out infinite}
 .dwp3d-cards{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;pointer-events:auto}
 .dwp3d-card{position:relative;padding:7px 10px 8px;min-width:0;outline:none}
 .dwp3d-card:focus-visible{box-shadow:0 0 0 2px #8ea2ff}
@@ -123,17 +128,17 @@ export const CSS = `
 @media (prefers-reduced-motion: reduce){
   .dwp3d-spin{animation:none}
   .dwp3d-label,.dwp3d-bar>i{transition:none}
-  .dwp3d-label[data-state=working]:before,.dwp3d-tick .st.run,.dwp3d-card .v[data-bump]{animation:none}
+  .dwp3d-label[data-state=working]:before,.dwp3d-tick .st.run,.dwp3d-card .v[data-bump],.dwp3d-btn.wait{animation:none}
 }
 .dwp3d-viewsel{display:none}
 @container dwp3d (max-width: 900px){
   .dwp3d-cards{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .dwp3d-viewsel{display:inline-block}
+  .dwp3d-views{display:none}
 }
 @container dwp3d (max-width: 760px){
   .dwp3d-ticker{display:none}
   .dwp3d-card .v{font-size:15px}
-  .dwp3d-viewsel{display:inline-block}
-  .dwp3d-views{display:none}
 }
 @container dwp3d (max-width: 520px){
   .dwp3d-title h2{display:none}

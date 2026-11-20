@@ -4,7 +4,7 @@ import { buildWorld } from './world.js';
 import { createPost } from './post.js';
 import { BACKGROUND } from './environment.js';
 import { NO_REFLECT_LAYER } from './reflection.js';
-import { ATRIUM, CAMERA_LIMIT, cameraRegion } from './layout.js';
+import { CAMERA_LIMIT, cameraRegion, clampCameraPoint, clampTargetPoint } from './layout.js';
 import {
   SCREEN_MIN_D,
   screenAngle,
@@ -148,7 +148,7 @@ function createGpuTimer(gl) {
 
 /**
  * Mount the factory into `container` (which must be position: relative and sized).
- * opts: { quality ('auto' | tier), fps ('auto' | 30 | 60 | 120 | 0), demo, look ('dusk' | 'day'),
+ * opts: { quality ('auto' | tier), fps ('auto' | 30 | 60 | 120 | 0), demo, look ('dusk' | 'day' | 'night'),
  *         brightness (0.6..1.6), onHover, onSelect, onPerf, onError, onFocus, onActive, onReady,
  *         onMode(mode), onScreen(id | null), onUserCamera() }.
  * onMode reports 'orbit', 'look' or 'screen'; onScreen the media-wall screen in close-up;
@@ -329,6 +329,7 @@ export function createFactoryScene(container, opts = {}) {
     const tier = TIER[quality];
     renderer.shadowMap.enabled = quality !== 'low';
     world = buildWorld(renderer, quality, { demo, look, brightness });
+    world.setReducedMotion(reduceMotion);
     highlight = new THREE.LineSegments(bracketGeo, new THREE.LineBasicMaterial({
       color: 0x2f9bff, transparent: true, opacity: 0.85, depthTest: false, depthWrite: false, toneMapped: false,
     }));
@@ -377,22 +378,12 @@ export function createFactoryScene(container, opts = {}) {
   // ── Orbit limits ─────────────────────────────────────────────
   // The orbit target stays near the machines and clear of walls; when it has to move, the
   // camera moves with it so the view does not swing. The camera height is bounded through the
-  // polar angle, and the rendered view is pulled in front of the glass and walls (updateView),
-  // so the control camera itself is never shoved around.
-  const _clampV = new THREE.Vector2();
-  function clampInside(v, r, y0, y1) {
-    _clampV.set(v.x - ATRIUM.cx, v.z - ATRIUM.cz);
-    if (_clampV.length() > r) {
-      _clampV.setLength(r);
-      v.x = ATRIUM.cx + _clampV.x;
-      v.z = ATRIUM.cz + _clampV.y;
-    }
-    v.y = clamp(v.y, y0, y1);
-  }
+  // polar angle, and the rendered view is pulled in before the edge of the walkable space and
+  // in front of walls (updateView), so the control camera itself is never shoved around.
   function placeTarget(T) {
-    clampInside(T, CAMERA_LIMIT.targetR, CAMERA_LIMIT.targetYMin, CAMERA_LIMIT.targetYMax);
+    clampTargetPoint(T);
     camspace.keepClear(T, TARGET_CLEARANCE);
-    clampInside(T, CAMERA_LIMIT.targetR, CAMERA_LIMIT.targetYMin, CAMERA_LIMIT.targetYMax);
+    clampTargetPoint(T);
     return T;
   }
   const _t0 = new THREE.Vector3();
@@ -496,7 +487,7 @@ export function createFactoryScene(container, opts = {}) {
     if (mode === 'orbit') {
       const k = clamp(1.7 / Math.max(0.3, camera.aspect), 1, 2.3);
       pos.sub(target).multiplyScalar(k).add(target);
-      clampInside(pos, CAMERA_LIMIT.r, CAMERA_LIMIT.yMin, CAMERA_LIMIT.yMax);
+      if (!cameraRegion(pos)) clampCameraPoint(pos, target);
     }
     return { pos, target, mode };
   }
@@ -537,11 +528,11 @@ export function createFactoryScene(container, opts = {}) {
     if (wasScreen) leaveScreen();
     if (onMode) onMode(m);
   }
-  /** Leave roaming: orbit around the point straight ahead, or fly back in from the balcony. */
+  /** Leave roaming: orbit around the point straight ahead (hall or balcony), else fly back in. */
   function enterOrbit() {
-    const inHall = cameraRegion(camera.position) === 'hall';
+    const inside = !!cameraRegion(camera.position);
     applyMode('orbit');
-    if (!inHall) {
+    if (!inside) {
       flyTo('overview');
       return;
     }
@@ -1277,6 +1268,7 @@ export function createFactoryScene(container, opts = {}) {
   const onMotionPref = (e) => {
     reduceMotion = !!e.matches;
     applyPost();
+    if (world) world.setReducedMotion(reduceMotion);
     touch();
   };
   if (motionQuery) {
@@ -1418,7 +1410,7 @@ export function createFactoryScene(container, opts = {}) {
         applyMode(scr.back ? scr.back.mode : 'orbit');
       }
       if (on && camMode !== 'orbit') {
-        if (cameraRegion(camera.position) === 'hall') enterOrbit();
+        if (cameraRegion(camera.position)) enterOrbit();
         else jumpTo('overview');
       }
       follow = !!on;
@@ -1440,6 +1432,8 @@ export function createFactoryScene(container, opts = {}) {
     stats: () => (world ? world.stats() : null),
     /** Subagent dock counters for the tooltip: { running, done, failed, stopped, overflow, wf, last }. */
     dockInfo: () => (world ? world.dockInfo() : null),
+    /** Smoothed session activity 0..1; the background music follows it. */
+    activity: () => (world ? world.activity() : 0),
     dispose: destroy,
   };
 }
