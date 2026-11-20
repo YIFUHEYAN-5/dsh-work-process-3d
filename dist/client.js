@@ -1,4 +1,4 @@
-/*! dsh-work-process-3d 0.3.0 | MIT | bundles three.js (MIT, Copyright Three.js Authors) */
+/*! dsh-work-process-3d 1.0.0 | MIT | bundles three.js (MIT, Copyright Three.js Authors) */
 window.__ModuleLoader__.load({
   id: "dsh-work-process-3d",
   factory(require) {
@@ -5580,16 +5580,18 @@ ${Zs}`);let sa=Zs.split(`
 .dwp3d-card .v{font-size:16px;font-weight:650;color:#f1f4fa;font-variant-numeric:tabular-nums;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dwp3d-card .v[data-bump]{animation:dwp3d-bump .9s ease-out}
 @keyframes dwp3d-bump{from{color:var(--dwp3d-c,#8fb0ff);text-shadow:0 0 10px var(--dwp3d-c,#8fb0ff)}to{color:#f1f4fa;text-shadow:0 0 0 transparent}}
-.dwp3d-card .s{font-size:11px;color:#b4c0d8;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* The second line carries the numbers that matter (cache miss, off-peak price, batch result), so
+   it wraps to two lines instead of clipping them away whenever the panel is a little narrow. */
+.dwp3d-card .s{font-size:11px;line-height:1.34;color:#b4c0d8;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .dwp3d-bar{height:3px;border-radius:2px;background:rgba(255,255,255,.09);margin-top:5px;overflow:hidden}
 .dwp3d-bar>i{display:block;height:100%;border-radius:2px;background:var(--dwp3d-c,#4d6bfe);transition:width .4s}
 /* Compact readout row: the ticker and legend run along the same line as the cards instead of
    stacking three rows of chrome over the bottom third of the scene. */
 .dwp3d-strip{display:flex;align-items:stretch;gap:6px;pointer-events:none}
 .dwp3d-strip>.dwp3d-cards{flex:1 1 auto;grid-template-columns:repeat(8,minmax(0,1fr))}
-.dwp3d-strip>.dwp3d-ticker{flex:0 1 30%;min-width:180px;max-width:340px;align-self:stretch;padding:6px 9px 5px;display:flex;flex-direction:column;justify-content:center}
+.dwp3d-strip>.dwp3d-ticker{flex:0 1 26%;min-width:170px;max-width:300px;align-self:stretch;padding:6px 9px 5px;display:flex;flex-direction:column;justify-content:center}
 .dwp3d-strip>.dwp3d-ticker .dwp3d-tick{height:18px}
-.dwp3d-strip>.dwp3d-legend{flex:0 1 20%;min-width:120px;max-width:240px;margin-left:0;align-self:stretch;justify-content:center;font-size:11px}
+.dwp3d-strip>.dwp3d-legend{flex:0 1 17%;min-width:116px;max-width:210px;margin-left:0;align-self:stretch;justify-content:center;font-size:11px}
 .dwp3d-strip>.dwp3d-legend .dwp3d-legend-row{flex-direction:column;align-items:flex-start;gap:3px}
 .dwp3d-strip>*{pointer-events:auto}
 .dwp3d-strip .dwp3d-card{padding:6px 9px 7px}

@@ -4,7 +4,39 @@
 
 A DeepSeek Harness (DSH) plugin. It adds a "3D process" tab to every conversation and renders the agent's work as a realistic 3D precision factory: tokens are the fuel, tool calls are processed at stations, drones carry out subagent work, and the result of each conversation turn is stored as a batch.
 
-> Version 0.3.0: an open roof, a starry sky with a ringed planet, a Night scene, a sky-high infinity pool on the balcony and background music. The scene runs on the conversation's real data, and a demo mode remains. After installing or updating the plugin, **restart DSH once** so that its Host part (the session projection and the balance lookup) loads.
+> Version 1.0.0, the first stable release: an open roof, a starry sky with a ringed planet, a Night scene, a sky-high infinity pool on the balcony and background music. The scene runs on the conversation's real data, and a demo mode remains. After installing or updating the plugin, **restart DSH once** so that its Host part (the session projection and the balance lookup) loads.
+
+## Install
+
+- **Plugin market**: search for "3D process" or `dsh-work-process-3d` in the DSH plugin market (dsh-market) and install it there.
+- **Manually**: download `dsh-work-process-3d.tgz` from [Releases](https://github.com/YIFUHEYAN-5/dsh-work-process-3d/releases/latest) and add that package in DSH's Plugins panel.
+- **From a checkout**: clone the repository and either let a DSH agent install the directory with `plugin_manager` `install_bundle`, or point Plugins > Add plugin at the directory.
+
+Restart DSH after installing or updating. A Client-only change (the page) shows up after a page refresh; a Host change (`src/host/`, `src/model/`) needs the restart.
+
+## Screenshots
+
+The overview with live data: stations, the robot arm, the media wall and the readout strip.
+
+![Overview](assets/screenshot-1-overview.png)
+
+Toward the balcony: the ringed planet, the sunset and the city.
+
+![Balcony](assets/screenshot-2-balcony.png)
+
+The ten stations and the curved media wall behind them.
+
+![Stations](assets/screenshot-4-stations.png)
+
+The Night look with the infinity pool along the balcony.
+
+![Night](assets/screenshot-3-night.png)
+
+The living quarters behind the media wall.
+
+![Living](assets/screenshot-5-living.png)
+
+These frames come from a running DSH window; several were captured with software rendering and therefore lack the bloom, live shadows and floor reflections you get on a real GPU.
 
 ## What the scene shows
 
@@ -50,7 +82,7 @@ The plugin sends no conversation content to any external service.
 
 ## Requirements
 
-- DeepSeek Harness 0.2.0 or later (developed on 0.2.2-rc.3).
+- DeepSeek Harness 0.2.0-rc.1 or later (developed on 0.2.2-rc.3, matching `engines.dsh` in `package.json`).
 - A browser or the DSH desktop app with WebGL 2 and hardware acceleration turned on.
 - Restart DSH once after installing or updating the plugin.
 
@@ -63,6 +95,8 @@ pnpm test    # tests for the model, session projection, balance route, camera, d
 ```
 
 `dist/` is committed with the sources so the plugin can be installed straight from the repository. To try a local copy in DSH, ask the DSH agent to install the repository folder with plugin_manager install_bundle. Client changes show after a page refresh; Host changes (`src/host/`, `src/model/`) need a DSH restart.
+
+Before a release, run `pnpm test` and `pnpm build`, then `pnpm pack`, rename the tarball to the version-less `dsh-work-process-3d.tgz` and attach it to a GitHub Release: the market entry points at `releases/latest/download/dsh-work-process-3d.tgz`, so later releases need no entry change. Never delete or rewrite a published Release or tag, or existing installs break.
 
 ### Change workflow
 
@@ -87,9 +121,9 @@ Layout:
 
 1. **M0 style prototype** (done): modeling, materials, lighting, camera and animation.
 2. **M1 real data** (done, 0.2.0): a Host session projection with real tokens, context, tool calls, turns, file changes, subagents and workflows; balance from the DeepSeek account or API key.
-3. **M2 polish** (in progress): 0.3.0 adds the open roof, the starry sky and planet, the night scene, the sky pool and background music; batch replay, a timeline and an input/output report come next.
+3. **M2 polish** (done, 1.0.0): the open roof, the starry sky and planet, the night scene, the sky pool, background music, the screen close-up, the living area and a pass over the whole look. Batch replay, a timeline and an input/output report come next.
 4. **M3 optional extras**: DeepSeek tool APIs (for example voice announcements), off by default with costs shown.
-5. **M4 release**: npm package and a listing in the DSH plugin market.
+5. **M4 release** (done, 1.0.0): a GitHub Release and a listing in the DSH plugin market.
 
 ## License
 

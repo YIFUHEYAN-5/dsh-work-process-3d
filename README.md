@@ -4,7 +4,39 @@
 
 DeepSeek Harness（DSH）插件。它在会话视图里新增「3D 工作进程」标签页，把智能体的工作过程渲染成一座写实的 3D 精密工厂：token 是燃料，工具调用在各个工位上加工，子智能体由无人机执行，每一轮对话的成果作为一个批次入库。
 
-> 版本 0.3.0：露天屋顶、星空与行星、「黑夜」场景、阳台上的高空无边泳池和背景音乐。画面接入本会话的真实数据，也保留了演示模式。安装或更新插件后需要**重启一次 DSH**，插件的 Host 端（会话投影和余额查询）才会加载。
+> 版本 1.0.0（首个正式版）：露天屋顶、星空与行星、「黑夜」场景、阳台上的高空无边泳池和背景音乐，接入本会话的真实数据，并保留了演示模式。安装或更新插件后需要**重启一次 DSH**，插件的 Host 端（会话投影和余额查询）才会加载。
+
+## 安装
+
+- **插件市场**：在 DSH 插件市场（dsh-market）里搜索「3D 工作进程」或 `dsh-work-process-3d`，一键安装。
+- **手动安装**：从 [Releases](https://github.com/YIFUHEYAN-5/dsh-work-process-3d/releases/latest) 下载 `dsh-work-process-3d.tgz`，在 DSH 的「插件」里添加这个包。
+- **从源码目录安装**：克隆仓库后，让 DSH 智能体用 plugin_manager 的 install_bundle 安装仓库目录；或把目录路径填进「插件」的添加面板。
+
+安装或更新后重启 DSH。插件只有 Client 端（页面）改动时可以刷新页面生效，Host 端（`src/host/`、`src/model/`）改动必须重启。
+
+## 截图
+
+实时数据下的总览：工位、机械臂、大屏与底部指标条。
+
+![总览](assets/screenshot-1-overview.png)
+
+阳台方向：带光环的行星、夕阳和城市。
+
+![阳台](assets/screenshot-2-balcony.png)
+
+十座工位与背后的弧形大屏墙。
+
+![工位](assets/screenshot-4-stations.png)
+
+「黑夜」场景与阳台外沿的高空无边泳池。
+
+![黑夜](assets/screenshot-3-night.png)
+
+大屏墙后面的生活区。
+
+![生活区](assets/screenshot-5-living.png)
+
+以上截图取自本机运行中的 DSH 界面，其中几张是无显卡加速的软件渲染截取的，所以看不到实机上的泛光、实时阴影和地面反射。
 
 ## 场景里有什么
 
@@ -50,7 +82,7 @@ DeepSeek Harness（DSH）插件。它在会话视图里新增「3D 工作进程�
 
 ## 系统要求
 
-- DeepSeek Harness 0.2.0 及以上（开发时使用 0.2.2-rc.3）。
+- DeepSeek Harness 0.2.0-rc.1 及以上（开发时使用 0.2.2-rc.3，与 `package.json` 的 `engines.dsh` 一致）。
 - 支持 WebGL 2 的浏览器或 DSH 桌面端，并开启硬件加速。
 - 安装或更新插件后重启一次 DSH。
 
@@ -63,6 +95,8 @@ pnpm test    # 数据模型、会话投影、余额路由、镜头、坞站、�
 ```
 
 `dist/` 随源码一起提交，这样可以直接从仓库安装。要在 DSH 里试用本地副本，让 DSH 智能体用 plugin_manager 的 install_bundle 安装仓库所在的目录即可。改动 Client 端后刷新页面即可看到；改动 Host 端（`src/host/`、`src/model/`）后需要重启 DSH。
+
+发版前先 `pnpm test` 和 `pnpm build`，再 `pnpm pack` 打包，把产物改名为不带版本号的 `dsh-work-process-3d.tgz` 挂到 GitHub Release：插件市场的条目用 `releases/latest/download/dsh-work-process-3d.tgz` 指向它，这样以后发新版不用再改市场条目。已经发布的 Release 和 tag 不要删除或改写，否则老用户的安装会断链。
 
 ### 改动流程
 
@@ -87,9 +121,9 @@ pnpm test    # 数据模型、会话投影、余额路由、镜头、坞站、�
 
 1. **M0 风格原型**（已完成）：建模、材质、灯光、镜头和动画。
 2. **M1 真实数据**（已完成，0.2.0）：Host 端会话投影，真实的 token、上下文、工具调用、轮次、文件改动、子智能体与工作流，余额来自 DeepSeek 账户或 API Key。
-3. **M2 打磨**（进行中）：0.3.0 加入露天楼顶、星空与行星、黑夜场景、高空泳池和背景音乐；之后是批次回放、时间线与投入产出报表。
+3. **M2 打磨**（已完成，1.0.0）：露天楼顶、星空与行星、黑夜场景、高空泳池、背景音乐，以及大屏近看、生活区与整体视觉返工。之后计划加入批次回放、时间线与投入产出报表。
 4. **M3 可选扩展**：DeepSeek 工具 API（语音播报等），默认关闭并标明费用。
-5. **M4 发布**：npm 发布并提交到 DSH 插件市场。
+5. **M4 发布**（已完成，1.0.0）：发布 GitHub Release 并提交到 DSH 插件市场。
 
 ## 许可证
 
